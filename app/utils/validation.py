@@ -1,16 +1,14 @@
-from pydantic import BaseModel, Field, field_validator  # Pydantic v2
+from pydantic import BaseModel, Field, field_validator, EmailStr
 import re
-from app.utils.logger import get_logger
+import logging
 
-logger = get_logger("validation")
+logger = logging.getLogger("validation")
 
 # ---------------------- Validators ----------------------
 
 class TradingSymbolValidator:
-    """
-    Trading symbol validation
-    """
-    VALID_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]  # Örnek semboller
+    """Trading symbol validation"""
+    VALID_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "DOTUSDT", "LINKUSDT"]
 
     @classmethod
     def validate_symbol(cls, symbol: str) -> bool:
@@ -26,11 +24,8 @@ class TradingSymbolValidator:
         # Whitelist check
         return symbol in cls.VALID_SYMBOLS
 
-
 class TradingParametersValidator:
-    """
-    Trading parameters validation
-    """
+    """Trading parameters validation"""
     
     @staticmethod
     def validate_leverage(leverage: int) -> bool:
@@ -49,11 +44,8 @@ class TradingParametersValidator:
         valid_timeframes = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d']
         return timeframe in valid_timeframes
 
-
 class ApiKeyValidator:
-    """
-    API key validation
-    """
+    """API key validation"""
     
     @staticmethod
     def validate_binance_api_key(api_key: str) -> bool:
@@ -68,7 +60,6 @@ class ApiKeyValidator:
             return False
         secret = secret.strip()
         return len(secret) == 64 and secret.isalnum()
-
 
 # ---------------------- Pydantic Models ----------------------
 
@@ -102,10 +93,10 @@ class EnhancedStartRequest(BaseModel):
             raise ValueError('Take profit must be greater than stop loss')
         return v
 
-
 class EnhancedApiKeysRequest(BaseModel):
     api_key: str = Field(..., min_length=64, max_length=64)
     api_secret: str = Field(..., min_length=64, max_length=64)
+    testnet: bool = Field(default=False)
     
     @field_validator('api_key')
     @classmethod
@@ -121,12 +112,29 @@ class EnhancedApiKeysRequest(BaseModel):
             raise ValueError('Invalid Binance API secret format')
         return v
 
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=6)
 
-# ---------------------- Helper Function ----------------------
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=6)
+    full_name: str = Field(..., min_length=2, max_length=100)
+
+def sanitize_string(text: str, max_length: int = 100) -> str:
+    """String sanitization"""
+    if not text:
+        return ""
+    
+    # Remove dangerous characters
+    text = re.sub(r'[<>"\']', '', text)
+    
+    # Limit length
+    if len(text) > max_length:
+        text = text[:max_length]
+    
+    return text.strip()
 
 def validate_user_input(data: dict):
-    """
-    Validate user input dict using EnhancedStartRequest model.
-    Returns validated model instance or raises Pydantic ValidationError.
-    """
+    """Validate user input dict using EnhancedStartRequest model"""
     return EnhancedStartRequest(**data)
