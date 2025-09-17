@@ -131,7 +131,8 @@
                 }
                 
                 const firebaseConfig = await response.json();
-                console.log('Firebase config received:', firebaseConfig);
+                console.log('Firebase config received from backend');
+                // GÜVENLİK: Firebase config'i console'da gösterme
                 
                 // Required fields kontrolü
                 const requiredFields = ['apiKey', 'authDomain', 'projectId', 'appId'];
@@ -282,26 +283,45 @@
                 
                 console.log('Login successful:', user.uid);
                 
-                // Update last login in database
-                const userRef = database.ref(`users/${user.uid}`);
-                await userRef.update({
-                    last_login: firebase.database.ServerValue.TIMESTAMP,
-                    last_login_ip: await getUserIP()
-                });
+                // Update last login in database (safe)
+                try {
+                    const userRef = database.ref(`users/${user.uid}`);
+                    await userRef.update({
+                        last_login: firebase.database.ServerValue.TIMESTAMP,
+                        last_login_ip: await getUserIP()
+                    });
+                    console.log('Last login updated');
+                } catch (dbError) {
+                    console.error('Last login update failed:', dbError);
+                    // Continue with login even if update fails
+                }
                 
                 showSuccess('Giriş başarılı! Yönlendiriliyorsunuz...');
                 
                 // Check if user is admin
-                const userData = await userRef.once('value');
-                const userInfo = userData.val();
-                
-                if (userInfo && userInfo.role === 'admin') {
-                    // Redirect to admin panel
-                    setTimeout(() => {
-                        window.location.href = '/admin.html';
-                    }, 1000);
-                } else {
-                    // Redirect to dashboard
+                try {
+                    const userRef = database.ref(`users/${user.uid}`);
+                    const userData = await userRef.once('value');
+                    const userInfo = userData.val();
+                    
+                    // Check admin email or admin role
+                    const isAdminEmail = user.email === 'admin@epostaniz.com';
+                    const hasAdminRole = userInfo && userInfo.role === 'admin';
+                    
+                    if (isAdminEmail || hasAdminRole) {
+                        // Redirect to admin panel
+                        setTimeout(() => {
+                            window.location.href = '/admin.html';
+                        }, 1000);
+                    } else {
+                        // Redirect to dashboard
+                        setTimeout(() => {
+                            window.location.href = '/dashboard.html';
+                        }, 1000);
+                    }
+                } catch (dbError) {
+                    console.error('User role check failed:', dbError);
+                    // Default to dashboard if role check fails
                     setTimeout(() => {
                         window.location.href = '/dashboard.html';
                     }, 1000);
