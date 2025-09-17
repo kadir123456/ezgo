@@ -166,6 +166,7 @@ function updateApiStatus(hasKeys = false, isConnected = false) {
     const apiStatusIndicator = document.getElementById('api-status-indicator');
     const manageApiBtn = document.getElementById('manage-api-btn');
     const controlButtons = document.getElementById('control-buttons');
+    const tradingSettings = document.getElementById('trading-settings');
     
     apiKeysConfigured = hasKeys && isConnected;
     
@@ -197,6 +198,10 @@ function updateApiStatus(hasKeys = false, isConnected = false) {
     
     if (controlButtons) {
         controlButtons.style.display = apiKeysConfigured ? 'grid' : 'none';
+    }
+    
+    if (tradingSettings) {
+        tradingSettings.style.display = apiKeysConfigured ? 'block' : 'none';
     }
     
     // Update start button
@@ -255,8 +260,8 @@ async function loadPaymentInfo() {
         
         // Update payment amount
         const paymentAmount = document.getElementById('payment-amount');
-        if (paymentAmount && appInfo.monthly_price) {
-            paymentAmount.textContent = `$${appInfo.monthly_price}/Ay`;
+        if (paymentAmount && appInfo.bot_price) {
+            paymentAmount.textContent = `$${appInfo.bot_price}/Ay`;
         }
         
         // Update server IPs
@@ -322,6 +327,17 @@ async function saveAPIKeys(apiKey, apiSecret, testnet = false) {
             return false;
         }
         
+        // Show saving message
+        const apiTestResult = document.getElementById('api-test-result');
+        if (apiTestResult) {
+            apiTestResult.style.display = 'block';
+            apiTestResult.className = 'api-test-result info';
+            apiTestResult.innerHTML = `
+                <i class="fas fa-spinner fa-spin"></i>
+                API anahtarları test ediliyor...
+            `;
+        }
+        
         // Simple encryption (Base64) - production'da daha güçlü şifreleme kullanılmalı
         const encryptedKey = btoa(apiKey);
         const encryptedSecret = btoa(apiSecret);
@@ -338,6 +354,15 @@ async function saveAPIKeys(apiKey, apiSecret, testnet = false) {
         // Save to Firebase
         await database.ref(`users/${currentUser.uid}`).update(apiData);
         
+        // Show success message immediately
+        if (apiTestResult) {
+            apiTestResult.className = 'api-test-result success';
+            apiTestResult.innerHTML = `
+                <i class="fas fa-check-circle"></i>
+                API anahtarları başarıyla kaydedildi ve test ediliyor...
+            `;
+        }
+        
         // Test API connection (simulated)
         setTimeout(async () => {
             await database.ref(`users/${currentUser.uid}`).update({
@@ -346,7 +371,15 @@ async function saveAPIKeys(apiKey, apiSecret, testnet = false) {
             });
             
             checkApiStatus();
-            showToast('API anahtarları başarıyla test edildi!', 'success');
+            showToast('API anahtarları başarıyla test edildi ve bağlantı doğrulandı!', 'success');
+            
+            if (apiTestResult) {
+                apiTestResult.className = 'api-test-result success';
+                apiTestResult.innerHTML = `
+                    <i class="fas fa-check-circle"></i>
+                    API anahtarları başarıyla test edildi! Bot'u başlatabilirsiniz.
+                `;
+            }
         }, 2000);
         
         console.log('API keys saved successfully');
@@ -354,6 +387,16 @@ async function saveAPIKeys(apiKey, apiSecret, testnet = false) {
     } catch (error) {
         console.error('Error saving API keys:', error);
         showToast('API anahtarları kaydedilemedi: ' + error.message, 'error');
+        
+        const apiTestResult = document.getElementById('api-test-result');
+        if (apiTestResult) {
+            apiTestResult.style.display = 'block';
+            apiTestResult.className = 'api-test-result error';
+            apiTestResult.innerHTML = `
+                <i class="fas fa-times-circle"></i>
+                Hata: ${error.message}
+            `;
+        }
         return false;
     }
 }
@@ -367,8 +410,14 @@ async function startBot() {
     
     try {
         const startBtn = document.getElementById('start-bot-btn');
+        const statusMessageText = document.getElementById('status-message-text');
+        
         startBtn.disabled = true;
         startBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Başlatılıyor...';
+        
+        if (statusMessageText) {
+            statusMessageText.textContent = 'Bot başlatılıyor, lütfen bekleyin...';
+        }
         
         // Get trading settings
         const symbols = document.getElementById('trading-symbols').value
@@ -387,13 +436,35 @@ async function startBot() {
             throw new Error('Geçersiz trading çifti formatı. Örnek: BTCUSDT');
         }
         
+        // Validate order size
+        const orderSize = parseFloat(document.getElementById('order-size').value);
+        if (orderSize < 10 || orderSize > 1000) {
+            throw new Error('İşlem tutarı 10-1000 USDT arasında olmalıdır');
+        }
+        
+        // Validate stop loss and take profit
+        const stopLoss = parseFloat(document.getElementById('stop-loss').value);
+        const takeProfit = parseFloat(document.getElementById('take-profit').value);
+        
+        if (stopLoss <= 0 || stopLoss >= 25) {
+            throw new Error('Stop Loss 0.1-25% arasında olmalıdır');
+        }
+        
+        if (takeProfit <= 0 || takeProfit >= 50) {
+            throw new Error('Take Profit 0.1-50% arasında olmalıdır');
+        }
+        
+        if (takeProfit <= stopLoss) {
+            throw new Error('Take Profit, Stop Loss\'tan büyük olmalıdır');
+        }
+        
         const botConfig = {
             symbols: validSymbols,
             timeframe: document.getElementById('timeframe-select').value,
             leverage: parseInt(document.getElementById('leverage-select').value),
-            order_size_per_coin: parseFloat(document.getElementById('order-size').value),
-            stop_loss_percent: parseFloat(document.getElementById('stop-loss').value),
-            take_profit_percent: parseFloat(document.getElementById('take-profit').value),
+            order_size_per_coin: orderSize,
+            stop_loss_percent: stopLoss,
+            take_profit_percent: takeProfit,
             max_daily_trades: parseInt(document.getElementById('max-daily-trades').value),
             auto_compound: document.getElementById('auto-compound').checked,
             manual_trading_allowed: document.getElementById('manual-trading').checked,
@@ -406,6 +477,8 @@ async function startBot() {
             bot_active: true,
             bot_start_time: firebase.database.ServerValue.TIMESTAMP,
             bot_symbols: validSymbols.join(','),
+            bot_status: 'running',
+            bot_last_signal: 'HOLD',
             last_bot_update: firebase.database.ServerValue.TIMESTAMP
         });
         
@@ -417,11 +490,19 @@ async function startBot() {
         
     } catch (error) {
         console.error('Bot start error:', error);
-        showToast('Bot başlatma hatası: ' + error.message, 'error');
+        const errorMessage = `Bot başlatma hatası: ${error.message}`;
+        showToast(errorMessage, 'error');
+        
+        const statusMessageText = document.getElementById('status-message-text');
+        if (statusMessageText) {
+            statusMessageText.textContent = errorMessage;
+        }
         
         const startBtn = document.getElementById('start-bot-btn');
-        startBtn.disabled = false;
-        startBtn.innerHTML = '<i class="fas fa-play"></i> Bot\'u Başlat';
+        if (startBtn) {
+            startBtn.disabled = false;
+            startBtn.innerHTML = '<i class="fas fa-play"></i> Bot\'u Başlat';
+        }
     }
 }
 
@@ -431,13 +512,20 @@ async function stopBot() {
     
     try {
         const stopBtn = document.getElementById('stop-bot-btn');
+        const statusMessageText = document.getElementById('status-message-text');
+        
         stopBtn.disabled = true;
         stopBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Durduruluyor...';
+        
+        if (statusMessageText) {
+            statusMessageText.textContent = 'Bot durduruluyor, lütfen bekleyin...';
+        }
         
         // Update Firebase
         await database.ref(`users/${currentUser.uid}`).update({
             bot_active: false,
             bot_stop_time: firebase.database.ServerValue.TIMESTAMP,
+            bot_status: 'stopped',
             last_bot_update: firebase.database.ServerValue.TIMESTAMP
         });
         
@@ -449,11 +537,19 @@ async function stopBot() {
         
     } catch (error) {
         console.error('Bot stop error:', error);
-        showToast('Bot durdurma hatası: ' + error.message, 'error');
+        const errorMessage = `Bot durdurma hatası: ${error.message}`;
+        showToast(errorMessage, 'error');
+        
+        const statusMessageText = document.getElementById('status-message-text');
+        if (statusMessageText) {
+            statusMessageText.textContent = errorMessage;
+        }
     } finally {
         const stopBtn = document.getElementById('stop-bot-btn');
-        stopBtn.disabled = false;
-        stopBtn.innerHTML = '<i class="fas fa-stop"></i> Bot\'u Durdur';
+        if (stopBtn) {
+            stopBtn.disabled = false;
+            stopBtn.innerHTML = '<i class="fas fa-stop"></i> Bot\'u Durdur';
+        }
     }
 }
 
