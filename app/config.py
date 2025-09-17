@@ -165,49 +165,6 @@ class Settings:
         return len(warnings) == 0
 
     @classmethod
-    def get_firebase_web_config(cls):
-        """Frontend için Firebase web config döndür"""
-        logger = logging.getLogger("config")
-        
-        # Gerekli alanları kontrol et
-        required_fields = {
-            'apiKey': cls.FIREBASE_WEB_API_KEY,
-            'authDomain': cls.FIREBASE_WEB_AUTH_DOMAIN,
-            'databaseURL': cls.FIREBASE_DATABASE_URL,
-            'projectId': cls.FIREBASE_WEB_PROJECT_ID,
-            'storageBucket': cls.FIREBASE_WEB_STORAGE_BUCKET,
-            'messagingSenderId': cls.FIREBASE_WEB_MESSAGING_SENDER_ID,
-            'appId': cls.FIREBASE_WEB_APP_ID
-        }
-        
-        # Eksik alanları kontrol et
-        missing_fields = [key for key, value in required_fields.items() if not value]
-        if missing_fields:
-            logger.error(f"Missing Firebase Web config fields: {missing_fields}")
-            raise ValueError(f"Missing Firebase Web config: {', '.join(missing_fields)}")
-        
-        config = {
-            "apiKey": cls.FIREBASE_WEB_API_KEY,
-            "authDomain": cls.FIREBASE_WEB_AUTH_DOMAIN,
-            "databaseURL": cls.FIREBASE_DATABASE_URL,
-            "projectId": cls.FIREBASE_WEB_PROJECT_ID,
-            "storageBucket": cls.FIREBASE_WEB_STORAGE_BUCKET,
-            "messagingSenderId": cls.FIREBASE_WEB_MESSAGING_SENDER_ID,
-            "appId": cls.FIREBASE_WEB_APP_ID
-        }
-        
-        logger.info(f"Firebase Web config prepared for project: {config['projectId']}")
-        return {
-            "apiKey": config["apiKey"],
-            "authDomain": config["authDomain"],
-            "databaseURL": config["databaseURL"],
-            "projectId": config["projectId"],
-            "storageBucket": config["storageBucket"],
-            "messagingSenderId": config["messagingSenderId"],
-            "appId": config["appId"]
-        }
-
-    @classmethod
     def print_settings(cls):
         """Environment'dan yüklenen ayarları yazdır"""
         print("=" * 60)
