@@ -148,6 +148,9 @@
     <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-database-compat.js"></script>
     
+    <!-- Configuration loader -->
+    <script src="/static/js/config.js"></script>
+    
     <script>
         // Firebase configuration will be loaded from backend
         let firebaseApp = null;
@@ -157,16 +160,37 @@
         // Initialize Firebase with config from backend
         async function initializeFirebase() {
             try {
-                const firebaseConfig = await window.configLoader.getFirebaseConfig();
+                console.log('Loading Firebase config from backend...');
                 
-                firebaseApp = firebase.initializeApp(firebaseConfig);
-                auth = firebase.auth();
-                database = firebase.database();
+                // Backend'den Firebase config al
+                const response = await fetch('/api/firebase-config');
+                if (!response.ok) {
+                    throw new Error(`Config fetch failed: ${response.status}`);
+                }
                 
-                console.log('Firebase initialized successfully');
+                const firebaseConfig = await response.json();
+                console.log('Firebase config received:', firebaseConfig);
+                
+                // Required fields kontrolü
+                const requiredFields = ['apiKey', 'authDomain', 'projectId', 'appId'];
+                const missingFields = requiredFields.filter(field => !firebaseConfig[field]);
+                
+                if (missingFields.length > 0) {
+                    throw new Error(`Missing Firebase fields: ${missingFields.join(', ')}`);
+                }
+                
+                // Firebase'i initialize et
+                if (!firebaseApp) {
+                    firebaseApp = firebase.initializeApp(firebaseConfig);
+                    auth = firebase.auth();
+                    database = firebase.database();
+                    console.log('Firebase initialized successfully');
+                }
+                
                 return true;
             } catch (error) {
                 console.error('Firebase initialization failed:', error);
+                showError('Sistem başlatılamadı: ' + error.message);
                 return false;
             }
         }
@@ -366,41 +390,62 @@
         }
 
         // Check if user is already logged in
-        auth.onAuthStateChanged(async (user) => {
-            if (user && !isLoading) {
-                console.log('User already logged in, redirecting...');
-                
-                // Check if admin
-                try {
-                    const userData = await database.ref(`users/${user.uid}`).once('value');
-                    const userInfo = userData.val();
-                    
-                    if (userInfo && userInfo.role === 'admin') {
-                        window.location.href = '/admin.html';
-                    } else {
-                        window.location.href = '/dashboard.html';
+        function checkAuthState() {
+            if (auth) {
+                auth.onAuthStateChanged(async (user) => {
+                    if (user && !isLoading) {
+                        console.log('User already logged in, redirecting...');
+                        
+                        // Check if admin
+                        try {
+                            const userData = await database.ref(`users/${user.uid}`).once('value');
+                            const userInfo = userData.val();
+                            
+                            if (userInfo && userInfo.role === 'admin') {
+                                window.location.href = '/admin.html';
+                            } else {
+                                window.location.href = '/dashboard.html';
+                            }
+                        } catch (error) {
+                            console.error('Error checking user role:', error);
+                            window.location.href = '/dashboard.html';
+                        }
                     }
-                } catch (error) {
-                    console.error('Error checking user role:', error);
-                    window.location.href = '/dashboard.html';
-                }
+                });
+            } else {
+                console.warn('Auth not initialized yet');
             }
-        });
+        }
+
+        // Initialize everything
+        async function initializePage() {
+            try {
+                // Firebase'i başlat
+                const firebaseInitialized = await initializeFirebase();
+                if (!firebaseInitialized) {
+                    showError('Sistem başlatılamadı. Lütfen sayfayı yenileyin.');
+                    return;
+                }
+                
+                // Password toggle'ı başlat
+                initPasswordToggle();
+                
+                // Form event listener'ı ekle
+                if (registerForm) {
+                    registerForm.addEventListener('submit', handleRegister);
+                }
+                
+                // Auth state'i kontrol et
+                checkAuthState();
+                
+            } catch (error) {
+                console.error('Page initialization failed:', error);
+                showError('Sayfa başlatılamadı: ' + error.message);
+            }
+        }
 
         // Event listeners
-        document.addEventListener('DOMContentLoaded', async () => {
-            // Initialize Firebase first
-            const firebaseInitialized = await initializeFirebase();
-            if (!firebaseInitialized) {
-                showError('Sistem başlatılamadı. Lütfen sayfayı yenileyin.');
-                return;
-            }
-            
-            initPasswordToggle();
-            if (registerForm) {
-                registerForm.addEventListener('submit', handleRegister);
-            }
-        });
+        document.addEventListener('DOMContentLoaded', initializePage);
     </script>
 </body>
 </html>
