@@ -212,12 +212,16 @@
 
                             <!-- Trading Settings -->
                             <div class="trading-settings" id="trading-settings" style="display: none;">
-                                <div class="setting-group">
-                                    <label for="trading-symbols">Trading Çiftleri (virgülle ayırın):</label>
-                                    <input type="text" id="trading-symbols" class="form-input" value="BTCUSDT, ETHUSDT" placeholder="BTCUSDT, ETHUSDT, BNBUSDT">
-                                </div>
-                                
                                 <div class="setting-row">
+                                    <div class="setting-group">
+                                        <label for="symbol-select">Trading Çifti:</label>
+                                        <select id="symbol-select" class="form-input">
+                                            <option value="BTCUSDT">BTC/USDT</option>
+                                            <option value="ETHUSDT">ETH/USDT</option>
+                                            <option value="BNBUSDT">BNB/USDT</option>
+                                        </select>
+                                    </div>
+                                    
                                     <div class="setting-group">
                                         <label for="timeframe-select">Zaman Dilimi:</label>
                                         <select id="timeframe-select" class="form-input">
