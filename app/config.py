@@ -10,6 +10,24 @@ class Settings:
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "LIVE")
     BOT_USERNAME: str = os.getenv("BOT_USERNAME", "admin")
     BOT_PASSWORD: str = os.getenv("BOT_PASSWORD", "changeme123")
+    
+    # --- Firebase Ayarları ---
+    FIREBASE_CREDENTIALS_JSON: str = os.getenv("FIREBASE_CREDENTIALS_JSON")
+    FIREBASE_DATABASE_URL: str = os.getenv("FIREBASE_DATABASE_URL")
+    FIREBASE_WEB_API_KEY: str = os.getenv("FIREBASE_WEB_API_KEY")
+    FIREBASE_WEB_AUTH_DOMAIN: str = os.getenv("FIREBASE_WEB_AUTH_DOMAIN")
+    FIREBASE_WEB_PROJECT_ID: str = os.getenv("FIREBASE_WEB_PROJECT_ID")
+    FIREBASE_WEB_STORAGE_BUCKET: str = os.getenv("FIREBASE_WEB_STORAGE_BUCKET")
+    FIREBASE_WEB_MESSAGING_SENDER_ID: str = os.getenv("FIREBASE_WEB_MESSAGING_SENDER_ID")
+    FIREBASE_WEB_APP_ID: str = os.getenv("FIREBASE_WEB_APP_ID")
+    
+    # --- Güvenlik Ayarları ---
+    ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY")
+    ADMIN_EMAIL: str = os.getenv("ADMIN_EMAIL")
+    
+    # --- Uygulama Ayarları ---
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    
     BASE_URL = "https://fapi.binance.com" if os.getenv("ENVIRONMENT", "TEST") == "LIVE" else "https://testnet.binancefuture.com"
     WEBSOCKET_URL = "wss://fstream.binance.com" if os.getenv("ENVIRONMENT", "TEST") == "LIVE" else "wss://stream.binancefuture.com"
 
