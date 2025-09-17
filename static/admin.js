@@ -1,15 +1,3 @@
-// Firebase Config - Bu bilgileri kendi Firebase projenizden alın
-const firebaseConfig = {
-  apiKey: "AIzaSyC6ENhmUrrtrN6HFbudthifGwUGSzWih7A",
-  authDomain: "aviatoronline-6c2b4.firebaseapp.com",
-  databaseURL: "https://aviatoronline-6c2b4-default-rtdb.firebaseio.com",
-  projectId: "aviatoronline-6c2b4",
-  storageBucket: "aviatoronline-6c2b4.firebasestorage.app",
-  messagingSenderId: "471392622297",
-  appId: "1:471392622297:web:95dca8c181277d3526d0c8",
-  measurementId: "G-192Z8B860B"
-};
-
 // Global variables
 let firebaseApp = null;
 let auth = null;
@@ -17,8 +5,10 @@ let database = null;
 let currentUser = null;
 
 // Initialize Firebase
-function initializeFirebase() {
+async function initializeFirebase() {
     try {
+        const firebaseConfig = await window.configLoader.getFirebaseConfig();
+        
         firebaseApp = firebase.initializeApp(firebaseConfig);
         auth = firebase.auth();
         database = firebase.database();
@@ -655,7 +645,7 @@ async function initializeAdmin() {
         console.log('Initializing admin panel...');
         
         // Initialize Firebase
-        if (!initializeFirebase()) {
+        if (!(await initializeFirebase())) {
             throw new Error('Firebase initialization failed');
         }
 
