@@ -67,8 +67,14 @@ async def get_account_data(current_user: dict = Depends(get_current_user)):
         user_id = current_user['uid']
         user_data = firebase_manager.get_user_data(user_id)
         
+        # Kullanıcı verisi yoksa varsayılan döndür
         if not user_data:
-            raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+            return {
+                "totalBalance": 0.0,
+                "availableBalance": 0.0,
+                "unrealizedPnl": 0.0,
+                "message": "API anahtarları gerekli"
+            }
         
         # Gerçek Binance hesap bilgilerini al
         account_data = {"totalBalance": 0.0, "availableBalance": 0.0, "unrealizedPnl": 0.0}
