@@ -40,7 +40,6 @@ async function getFreshToken() {
 
 // Setup token refresh
 function setupTokenRefresh() {
-    // Refresh token every 50 minutes (Firebase tokens expire in 1 hour)
     if (tokenRefreshInterval) clearInterval(tokenRefreshInterval);
     
     tokenRefreshInterval = setInterval(async () => {
@@ -56,6 +55,7 @@ function setupTokenRefresh() {
 // API call helper with authentication
 async function makeAuthenticatedApiCall(endpoint, options = {}) {
     try {
+        // Ensure we have a fresh token
         if (!authToken) {
             console.log('No token available, getting fresh token...');
             await getFreshToken();
@@ -78,11 +78,12 @@ async function makeAuthenticatedApiCall(endpoint, options = {}) {
             headers: { ...defaultOptions.headers, ...options.headers }
         };
 
+        console.log(`Making API call to: ${endpoint}`);
         const response = await fetch(endpoint, mergedOptions);
         
         if (!response.ok) {
             if (response.status === 401) {
-                console.log('401 error, trying to refresh token...');
+                console.log('401 error, refreshing token and retrying...');
                 // Try to refresh token once
                 try {
                     await getFreshToken();
@@ -101,13 +102,16 @@ async function makeAuthenticatedApiCall(endpoint, options = {}) {
                             return await retryResponse.json();
                         }
                         return await retryResponse.text();
+                    } else {
+                        throw new Error(`HTTP ${retryResponse.status} after retry`);
                     }
                 } catch (refreshError) {
-                    console.error('Token refresh failed:', refreshError);
+                    console.error('Token refresh and retry failed:', refreshError);
+                    throw new Error('Authentication failed - please login again');
                 }
-                throw new Error('Authentication failed - please login again');
+            } else {
+                throw new Error(`HTTP ${response.status}`);
             }
-            throw new Error(`HTTP ${response.status}`);
         }
 
         const contentType = response.headers.get('content-type');
@@ -192,11 +196,8 @@ async function loadUserData() {
                 if (statusSpan) statusSpan.textContent = profile.subscription.status === 'active' ? 'Aktif' : 'Deneme';
             }
             
-            if (profile.subscription.expiryDate && daysRemaining) {
-                const expiryDate = new Date(profile.subscription.expiryDate);
-                const today = new Date();
-                const daysLeft = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
-                
+            if (daysRemaining) {
+                const daysLeft = profile.subscription.daysRemaining || 0;
                 daysRemaining.textContent = daysLeft > 0 ? `${daysLeft} gün kaldı` : 'Süresi dolmuş';
                 
                 if (subscriptionNote) {
@@ -214,20 +215,18 @@ async function loadUserData() {
             }
         }
         
-        console.log('User data loaded successfully');
+        console.log('User data loaded successfully from backend');
         
     } catch (error) {
-        console.error('Error fetching from backend:', error);
+        console.error('Error loading user data from backend:', error);
+        showNotification('Kullanıcı verileri yüklenemedi', 'error');
         
-        // Fallback to Firebase data
+        // Fallback to Firebase direct access
         if (currentUser && database) {
             try {
                 const userRef = database.ref(`users/${currentUser.uid}`);
-                authToken = await user.getIdToken(true); // Force fresh token
+                const snapshot = await userRef.once('value');
                 const userData = snapshot.val();
-                
-                // Setup automatic token refresh
-                setupTokenRefresh();
                 
                 if (userData) {
                     const userName = document.getElementById('user-name');
@@ -270,10 +269,10 @@ async function loadAccountData() {
             }
         }
         
-        console.log('Account data loaded successfully');
+        console.log('Account data loaded successfully from backend');
         
     } catch (error) {
-        console.error('Error fetching account data from backend:', error);
+        console.error('Error loading account data from backend:', error);
         showNotification('Hesap verileri yüklenemedi', 'error');
     }
 }
@@ -337,10 +336,10 @@ async function loadPositions() {
         }).join('');
 
         positionsContainer.innerHTML = positionsHTML;
-        console.log('Positions loaded successfully');
+        console.log('Positions loaded successfully from backend');
         
     } catch (error) {
-        console.error('Error fetching positions from backend:', error);
+        console.error('Error loading positions from backend:', error);
         const positionsContainer = document.getElementById('positions-container');
         if (positionsContainer) {
             positionsContainer.innerHTML = `
@@ -399,10 +398,10 @@ async function loadRecentActivity() {
         }).join('');
 
         activityList.innerHTML = tradesHTML;
-        console.log('Recent activity loaded successfully');
+        console.log('Recent activity loaded successfully from backend');
         
     } catch (error) {
-        console.error('Error fetching trades from backend:', error);
+        console.error('Error loading recent activity from backend:', error);
         const activityList = document.getElementById('activity-list');
         if (activityList) {
             activityList.innerHTML = `
@@ -517,7 +516,7 @@ async function checkApiStatus() {
             if (statusMessageText) statusMessageText.textContent = 'Bot\'u çalıştırmak için API anahtarlarınızı eklemelisiniz.';
         }
         
-        console.log('API status checked');
+        console.log('API status checked successfully');
         
     } catch (error) {
         console.error('Error checking API status:', error);
@@ -528,12 +527,12 @@ async function checkApiStatus() {
 // Load trading pairs
 async function loadTradingPairs() {
     try {
-        const response = await makeAuthenticatedApiCall('/api/bot/trading-pairs');
+        const response = await makeAuthenticatedApiCall('/api/trading/pairs');
         
         const symbolSelect = document.getElementById('symbol-select');
-        if (symbolSelect && response.pairs) {
+        if (symbolSelect && response) {
             symbolSelect.innerHTML = '';
-            response.pairs.forEach(pair => {
+            response.forEach(pair => {
                 const option = document.createElement('option');
                 option.value = pair.symbol;
                 option.textContent = `${pair.baseAsset}/${pair.quoteAsset}`;
@@ -578,7 +577,7 @@ async function getBotStatus() {
             if (stopBotBtn) stopBotBtn.disabled = true;
         }
         
-        console.log('Bot status loaded');
+        console.log('Bot status loaded successfully');
         
     } catch (error) {
         console.error('Error getting bot status:', error);
@@ -625,8 +624,6 @@ async function startBot() {
         if (response.success) {
             showNotification('Bot başarıyla başlatıldı!', 'success');
             await getBotStatus();
-            
-            // Start periodic updates
             startPeriodicUpdates();
         } else {
             throw new Error(response.message || 'Bot başlatılamadı');
@@ -666,8 +663,6 @@ async function stopBot() {
         if (response.success) {
             showNotification('Bot başarıyla durduruldu!', 'success');
             await getBotStatus();
-            
-            // Stop periodic updates
             stopPeriodicUpdates();
         } else {
             throw new Error(response.message || 'Bot durdurulamadı');
@@ -796,7 +791,7 @@ async function saveApiKeys(event) {
             setTimeout(() => {
                 closeApiModal();
                 checkApiStatus();
-                loadAccountData(); // Reload account data
+                loadAccountData();
             }, 2000);
             
         } else {
@@ -945,7 +940,7 @@ async function confirmPayment() {
         
     } catch (error) {
         console.error('Payment notification error:', error);
-        showNotification('Ödeme bildirimi gönderilemedi', 'error');
+        showNotification('Ödeme talebi gönderilemedi', 'error');
     } finally {
         if (confirmPaymentBtn) {
             confirmPaymentBtn.disabled = false;
@@ -1000,7 +995,7 @@ async function logout() {
     if (!confirm('Çıkış yapmak istediğinizden emin misiniz?')) return;
     
     try {
-        // Clear token refresh interval
+        // Clear intervals
         if (tokenRefreshInterval) {
             clearInterval(tokenRefreshInterval);
             tokenRefreshInterval = null;
@@ -1148,8 +1143,11 @@ async function initializeDashboard() {
                 
                 try {
                     // Get Firebase ID token for backend authentication
-                    authToken = await user.getIdToken();
+                    authToken = await user.getIdToken(true); // Force fresh token
                     console.log('Auth token obtained');
+                    
+                    // Setup automatic token refresh
+                    setupTokenRefresh();
                     
                     // Load all data
                     await Promise.all([
@@ -1184,7 +1182,6 @@ async function initializeDashboard() {
                 }
             } else {
                 console.log('User not authenticated, redirecting to login...');
-                // Clear any existing intervals
                 if (tokenRefreshInterval) {
                     clearInterval(tokenRefreshInterval);
                     tokenRefreshInterval = null;
