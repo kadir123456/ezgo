@@ -78,6 +78,8 @@ try:
     logger.info("All routes loaded successfully")
 except Exception as e:
     logger.error(f"Error loading routes: {e}")
+    # Continue without routes if there's an error
+    pass
 
 @app.on_event("startup")
 async def startup_event():
