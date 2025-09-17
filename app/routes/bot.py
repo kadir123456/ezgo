@@ -1,31 +1,41 @@
 from fastapi import APIRouter, HTTPException, Depends
-from fastapi.security import HTTPBearer
-from app.bot_manager import bot_manager
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from app.bot_manager import bot_manager, StartRequest
 from app.firebase_manager import firebase_manager
 from app.utils.crypto import encrypt_data, decrypt_data
-from app.utils.validation import EnhancedStartRequest, EnhancedApiKeysRequest
 from app.utils.metrics import metrics
 from app.binance_client import BinanceClient
+from app.utils.logger import get_logger
 import firebase_admin
 from firebase_admin import auth as firebase_auth
-import logging
+from typing import Optional
+from pydantic import BaseModel
 
-logger = logging.getLogger("bot_routes")
+logger = get_logger("bot_routes")
 router = APIRouter(prefix="/api/bot", tags=["bot"])
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
-async def get_current_user(token: str = Depends(security)):
-    """JWT token'dan kullanıcı bilgilerini al"""
+async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """Firebase Auth token'dan kullanıcı bilgilerini al"""
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Authentication token required")
+    
     try:
-        decoded_token = firebase_auth.verify_id_token(token.credentials)
+        decoded_token = firebase_auth.verify_id_token(credentials.credentials)
+        logger.info(f"Bot route - User authenticated: {decoded_token['uid']}")
         return decoded_token
     except Exception as e:
         logger.error(f"Token verification failed: {e}")
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+
+class ApiKeysRequest(BaseModel):
+    api_key: str
+    api_secret: str
+    testnet: bool = False
 
 @router.post("/start")
 async def start_bot(
-    request: EnhancedStartRequest,
+    request: StartRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """Kullanıcı için bot başlat"""
@@ -36,14 +46,7 @@ async def start_bot(
         # Kullanıcının abonelik durumunu kontrol et
         user_data = firebase_manager.get_user_data(user_id)
         if not user_data:
-            # Kullanıcı verisi yoksa oluştur
-            user_data = {
-                "email": current_user.get('email'),
-                "subscription_status": "trial",
-                "api_keys_set": False,
-                "created_at": firebase_manager.get_server_timestamp()
-            }
-            firebase_manager.update_user_data(user_id, user_data)
+            raise HTTPException(status_code=404, detail="Kullanıcı verisi bulunamadı")
         
         # Abonelik kontrolü
         subscription_status = user_data.get('subscription_status')
@@ -62,6 +65,13 @@ async def start_bot(
         
         # Metrics kaydet
         metrics.record_bot_start(user_id, request.symbol)
+        
+        # User data güncelle
+        firebase_manager.update_user_data(user_id, {
+            "bot_active": True,
+            "bot_symbol": request.symbol,
+            "bot_start_time": firebase_manager.get_server_timestamp()
+        })
         
         return {
             "success": True,
@@ -91,6 +101,12 @@ async def stop_bot(current_user: dict = Depends(get_current_user)):
         # Metrics kaydet
         metrics.record_bot_stop(user_id, "manual", "user_request")
         
+        # User data güncelle
+        firebase_manager.update_user_data(user_id, {
+            "bot_active": False,
+            "bot_stop_time": firebase_manager.get_server_timestamp()
+        })
+        
         return {
             "success": True,
             "message": "Bot başarıyla durduruldu"
@@ -114,23 +130,21 @@ async def get_bot_status(current_user: dict = Depends(get_current_user)):
             "status": status
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Bot status error: {e}")
         raise HTTPException(status_code=500, detail=f"Bot durumu alınamadı: {str(e)}")
 
 @router.post("/api-keys")
 async def save_api_keys(
-    request: EnhancedApiKeysRequest,
+    request: ApiKeysRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """Kullanıcının API anahtarlarını kaydet"""
     try:
         user_id = current_user['uid']
         logger.info(f"API keys save request from user: {user_id}")
-        
-        # API anahtarlarını şifrele
-        encrypted_api_key = encrypt_data(request.api_key)
-        encrypted_api_secret = encrypt_data(request.api_secret)
         
         # API anahtarlarını test et
         try:
@@ -147,6 +161,10 @@ async def save_api_keys(
             logger.error(f"API test failed for user {user_id}: {e}")
             raise HTTPException(status_code=400, detail=f"API anahtarları geçersiz: {str(e)}")
         
+        # API anahtarlarını şifrele
+        encrypted_api_key = encrypt_data(request.api_key)
+        encrypted_api_secret = encrypt_data(request.api_secret)
+        
         # Firebase'e kaydet
         api_data = {
             "binance_api_key": encrypted_api_key,
@@ -154,7 +172,8 @@ async def save_api_keys(
             "api_testnet": request.testnet,
             "api_keys_set": True,
             "api_connection_verified": True,
-            "api_updated_at": firebase_manager.get_server_timestamp()
+            "api_updated_at": firebase_manager.get_server_timestamp(),
+            "account_balance": balance
         }
         
         success = firebase_manager.update_user_data(user_id, api_data)
@@ -235,6 +254,8 @@ async def get_api_status(current_user: dict = Depends(get_current_user)):
                 "message": f"API test hatası: {str(e)}"
             }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"API status check error: {e}")
         raise HTTPException(status_code=500, detail=f"API durumu kontrol edilemedi: {str(e)}")
@@ -265,26 +286,3 @@ async def get_trading_pairs(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Trading pairs fetch error: {e}")
         raise HTTPException(status_code=500, detail="Trading çiftleri alınamadı")
-
-@router.get("/system-stats")
-async def get_system_stats(current_user: dict = Depends(get_current_user)):
-    """Sistem istatistikleri (admin için)"""
-    try:
-        user_id = current_user['uid']
-        user_data = firebase_manager.get_user_data(user_id)
-        
-        # Admin kontrolü
-        if not user_data or user_data.get('role') != 'admin':
-            raise HTTPException(status_code=403, detail="Admin yetkisi gerekli")
-        
-        stats = bot_manager.get_system_stats()
-        return {
-            "success": True,
-            "stats": stats
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"System stats error: {e}")
-        raise HTTPException(status_code=500, detail="Sistem istatistikleri alınamadı")
