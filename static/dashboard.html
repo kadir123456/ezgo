@@ -356,7 +356,9 @@
 
                     <div class="setting-group">
                         <label>TRC20 Cüzdan Adresi:</label>
-                        <div class="payment-address" id="payment-address">Yükleniyor...</div>
+                        <div class="payment-address" id="payment-address">
+                            <span id="payment-address-text">Yükleniyor...</span>
+                        </div>
                         <button class="copy-btn" id="copy-address-btn">
                             <i class="fas fa-copy"></i>
                             Kopyala
@@ -439,10 +441,13 @@
     </div>
 
     <!-- Firebase Scripts -->
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-database-compat.js"></script>
 
+    <!-- Configuration loader -->
+    <script src="/static/js/config.js"></script>
+    
     <!-- Dashboard JavaScript -->
     <script src="/static/dashboard.js"></script>
 </body>
