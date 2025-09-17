@@ -4,6 +4,7 @@ let auth = null;
 let database = null;
 let currentUser = null;
 let authToken = null;
+let tokenRefreshInterval = null;
 
 // Initialize Firebase
 async function initializeFirebase() {
@@ -21,11 +22,47 @@ async function initializeFirebase() {
     }
 }
 
+// Get fresh Firebase token
+async function getFreshToken() {
+    try {
+        if (currentUser) {
+            const token = await currentUser.getIdToken(true); // Force refresh
+            authToken = token;
+            console.log('Fresh auth token obtained');
+            return token;
+        }
+        throw new Error('No current user');
+    } catch (error) {
+        console.error('Error getting fresh token:', error);
+        throw error;
+    }
+}
+
+// Setup token refresh
+function setupTokenRefresh() {
+    // Refresh token every 50 minutes (Firebase tokens expire in 1 hour)
+    if (tokenRefreshInterval) clearInterval(tokenRefreshInterval);
+    
+    tokenRefreshInterval = setInterval(async () => {
+        try {
+            await getFreshToken();
+            console.log('Token refreshed automatically');
+        } catch (error) {
+            console.error('Auto token refresh failed:', error);
+        }
+    }, 50 * 60 * 1000); // 50 minutes
+}
+
 // API call helper with authentication
 async function makeAuthenticatedApiCall(endpoint, options = {}) {
     try {
         if (!authToken) {
-            throw new Error('No authentication token available');
+            console.log('No token available, getting fresh token...');
+            await getFreshToken();
+        }
+        
+        if (!authToken) {
+            throw new Error('Could not obtain authentication token');
         }
 
         const defaultOptions = {
@@ -45,7 +82,30 @@ async function makeAuthenticatedApiCall(endpoint, options = {}) {
         
         if (!response.ok) {
             if (response.status === 401) {
-                throw new Error('Authentication failed');
+                console.log('401 error, trying to refresh token...');
+                // Try to refresh token once
+                try {
+                    await getFreshToken();
+                    // Retry with new token
+                    const retryOptions = {
+                        ...mergedOptions,
+                        headers: {
+                            ...mergedOptions.headers,
+                            'Authorization': `Bearer ${authToken}`
+                        }
+                    };
+                    const retryResponse = await fetch(endpoint, retryOptions);
+                    if (retryResponse.ok) {
+                        const contentType = retryResponse.headers.get('content-type');
+                        if (contentType && contentType.includes('application/json')) {
+                            return await retryResponse.json();
+                        }
+                        return await retryResponse.text();
+                    }
+                } catch (refreshError) {
+                    console.error('Token refresh failed:', refreshError);
+                }
+                throw new Error('Authentication failed - please login again');
             }
             throw new Error(`HTTP ${response.status}`);
         }
@@ -163,8 +223,11 @@ async function loadUserData() {
         if (currentUser && database) {
             try {
                 const userRef = database.ref(`users/${currentUser.uid}`);
-                const snapshot = await userRef.once('value');
+                authToken = await user.getIdToken(true); // Force fresh token
                 const userData = snapshot.val();
+                
+                // Setup automatic token refresh
+                setupTokenRefresh();
                 
                 if (userData) {
                     const userName = document.getElementById('user-name');
@@ -709,7 +772,7 @@ async function saveApiKeys(event) {
             saveApiBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Test ediliyor...';
         }
         
-        const response = await makeAuthenticatedApiCall('/api/bot/api-keys', {
+        const response = await makeAuthenticatedApiCall('/api/user/api-keys', {
             method: 'POST',
             body: JSON.stringify({
                 api_key: apiKey.value.trim(),
@@ -733,6 +796,7 @@ async function saveApiKeys(event) {
             setTimeout(() => {
                 closeApiModal();
                 checkApiStatus();
+                loadAccountData(); // Reload account data
             }, 2000);
             
         } else {
@@ -936,8 +1000,16 @@ async function logout() {
     if (!confirm('Çıkış yapmak istediğinizden emin misiniz?')) return;
     
     try {
+        // Clear token refresh interval
+        if (tokenRefreshInterval) {
+            clearInterval(tokenRefreshInterval);
+            tokenRefreshInterval = null;
+        }
+        
         await auth.signOut();
         stopPeriodicUpdates();
+        authToken = null;
+        currentUser = null;
         window.location.href = '/login.html';
     } catch (error) {
         console.error('Logout error:', error);
@@ -1112,6 +1184,11 @@ async function initializeDashboard() {
                 }
             } else {
                 console.log('User not authenticated, redirecting to login...');
+                // Clear any existing intervals
+                if (tokenRefreshInterval) {
+                    clearInterval(tokenRefreshInterval);
+                    tokenRefreshInterval = null;
+                }
                 window.location.href = '/login.html';
             }
         });
