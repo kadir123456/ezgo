@@ -11,7 +11,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     
-    <!-- Dashboard CSS'i ayrı dosyadan yükle -->
     <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
@@ -79,118 +78,24 @@
         <main class="main-content">
             <div class="container">
                 <div class="dashboard-grid">
-                    <!-- Trading Controls Card -->
+                    <!-- Account Overview Card -->
                     <div class="card">
                         <div class="card-header">
                             <h2>
-                                <i class="fas fa-robot"></i>
-                                Trading Bot
+                                <i class="fas fa-wallet"></i>
+                                Hesap Özeti
                             </h2>
-                            <div class="bot-status" id="bot-status">
-                                <div class="status-dot" id="status-dot"></div>
-                                <span id="status-text">Çevrimdışı</span>
-                            </div>
-                        </div>
-                        
-                        <div class="card-content">
-                            <!-- API Status Box -->
-                            <div class="api-status-box">
-                                <div class="api-status-indicator" id="api-status-indicator">
-                                    <i class="fas fa-exclamation-triangle"></i>
-                                    <span>API anahtarları gerekli</span>
-                                </div>
-                                <button class="btn btn-primary btn-sm" id="manage-api-btn">
-                                    API Anahtarlarını Ekle
-                                </button>
-                            </div>
-
-                            <!-- Trading Settings -->
-                            <div class="trading-settings" id="trading-settings" style="display: none;">
-                                <div class="setting-group">
-                                    <label>Trading Çifti</label>
-                                    <select id="symbol-select" class="form-input">
-                                        <option value="BTCUSDT">Bitcoin (BTCUSDT)</option>
-                                        <option value="ETHUSDT">Ethereum (ETHUSDT)</option>
-                                        <option value="BNBUSDT">Binance Coin (BNBUSDT)</option>
-                                    </select>
-                                </div>
-
-                                <div class="setting-row">
-                                    <div class="setting-group">
-                                        <label>Zaman Dilimi</label>
-                                        <select id="timeframe-select" class="form-input">
-                                            <option value="1m">1 Dakika</option>
-                                            <option value="5m">5 Dakika</option>
-                                            <option value="15m" selected>15 Dakika</option>
-                                            <option value="30m">30 Dakika</option>
-                                            <option value="1h">1 Saat</option>
-                                        </select>
-                                    </div>
-
-                                    <div class="setting-group">
-                                        <label>Kaldıraç</label>
-                                        <select id="leverage-select" class="form-input">
-                                            <option value="1">1x</option>
-                                            <option value="2">2x</option>
-                                            <option value="5" selected>5x</option>
-                                            <option value="10">10x</option>
-                                            <option value="20">20x</option>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div class="setting-row">
-                                    <div class="setting-group">
-                                        <label>Pozisyon Büyüklüğü (USDT)</label>
-                                        <input type="number" id="order-size" class="form-input" value="35" min="10" max="10000">
-                                    </div>
-
-                                    <div class="setting-group">
-                                        <label>Stop Loss (%)</label>
-                                        <input type="number" id="stop-loss" class="form-input" value="2" min="0.1" max="50" step="0.1">
-                                    </div>
-                                </div>
-
-                                <div class="setting-group">
-                                    <label>Take Profit (%)</label>
-                                    <input type="number" id="take-profit" class="form-input" value="4" min="0.1" max="100" step="0.1">
-                                </div>
-
-                                <!-- Control Buttons -->
-                                <div class="control-buttons" id="control-buttons" style="display: none;">
-                                    <button class="btn btn-success" id="start-bot-btn">
-                                        <i class="fas fa-play"></i>
-                                        Bot'u Başlat
-                                    </button>
-                                    <button class="btn btn-danger" id="stop-bot-btn" disabled>
-                                        <i class="fas fa-stop"></i>
-                                        Bot'u Durdur
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Status Message -->
-                            <div class="status-message info">
-                                <i class="fas fa-info-circle"></i>
-                                <span id="status-message-text">Bot hazır. API anahtarlarınızı ekleyin.</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Account Info Card -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h2>
-                                <i class="fas fa-user"></i>
-                                Hesap Bilgileri
-                            </h2>
+                            <button class="btn btn-outline btn-sm" id="refresh-account-btn">
+                                <i class="fas fa-sync-alt"></i>
+                                Yenile
+                            </button>
                         </div>
                         
                         <div class="card-content">
                             <div class="account-stats">
                                 <div class="stat-item">
                                     <div class="stat-icon primary">
-                                        <i class="fas fa-wallet"></i>
+                                        <i class="fas fa-dollar-sign"></i>
                                     </div>
                                     <div class="stat-info">
                                         <div class="stat-value" id="total-balance">0.00 USDT</div>
@@ -235,9 +140,9 @@
                                 <div class="subscription-details">
                                     <div class="subscription-status">
                                         <span>Durum:</span>
-                                        <div class="status-badge" id="sub-status-badge">
-                                            <i class="fas fa-crown"></i>
-                                            <span>Aktif</span>
+                                        <div class="status-badge trial" id="sub-status-badge">
+                                            <i class="fas fa-clock"></i>
+                                            <span>Deneme</span>
                                         </div>
                                     </div>
                                     <div class="subscription-status">
@@ -245,6 +150,205 @@
                                         <span id="days-remaining">7 gün</span>
                                     </div>
                                     <p id="subscription-note" class="subscription-note">Aboneliğiniz aktif durumda.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Trading Bot Controls -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>
+                                <i class="fas fa-robot"></i>
+                                Trading Bot Kontrolü
+                            </h2>
+                            <div class="bot-status" id="bot-status">
+                                <div class="status-dot" id="status-dot"></div>
+                                <span id="status-text">Durduruldu</span>
+                            </div>
+                        </div>
+                        
+                        <div class="card-content">
+                            <!-- API Status -->
+                            <div class="api-status-box">
+                                <div class="api-status-indicator error" id="api-status-indicator">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    <span>API anahtarları gerekli</span>
+                                </div>
+                                <button class="btn btn-primary btn-sm" id="manage-api-btn">
+                                    <i class="fas fa-key"></i>
+                                    API Anahtarlarını Ekle
+                                </button>
+                            </div>
+
+                            <!-- Trading Settings -->
+                            <div class="trading-settings" id="trading-settings">
+                                <div class="setting-group">
+                                    <label>Trading Çiftleri (En fazla 3 adet, virgülle ayırın)</label>
+                                    <input 
+                                        type="text" 
+                                        id="trading-symbols" 
+                                        class="form-input" 
+                                        placeholder="BTCUSDT, ETHUSDT, BNBUSDT"
+                                        value="BTCUSDT"
+                                    >
+                                    <small class="form-help">
+                                        <i class="fas fa-info-circle"></i>
+                                        Örnek: BTCUSDT, ETHUSDT, ADAUSDT (maksimum 3 coin)
+                                    </small>
+                                </div>
+
+                                <div class="setting-row">
+                                    <div class="setting-group">
+                                        <label>Zaman Dilimi</label>
+                                        <select id="timeframe-select" class="form-input">
+                                            <option value="1m">1 Dakika</option>
+                                            <option value="5m">5 Dakika</option>
+                                            <option value="15m" selected>15 Dakika</option>
+                                            <option value="30m">30 Dakika</option>
+                                            <option value="1h">1 Saat</option>
+                                            <option value="4h">4 Saat</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="setting-group">
+                                        <label>Kaldıraç</label>
+                                        <select id="leverage-select" class="form-input">
+                                            <option value="1">1x</option>
+                                            <option value="2">2x</option>
+                                            <option value="5">5x</option>
+                                            <option value="10" selected>10x</option>
+                                            <option value="20">20x</option>
+                                            <option value="50">50x</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="setting-row">
+                                    <div class="setting-group">
+                                        <label>Coin Başına İşlem Tutarı (USDT)</label>
+                                        <input type="number" id="order-size" class="form-input" value="20" min="10" max="1000">
+                                        <small class="form-help">Her coin için ayrı ayrı bu tutar kullanılır</small>
+                                    </div>
+
+                                    <div class="setting-group">
+                                        <label>Stop Loss (%)</label>
+                                        <input type="number" id="stop-loss" class="form-input" value="2" min="0.5" max="25" step="0.1">
+                                    </div>
+                                </div>
+
+                                <div class="setting-row">
+                                    <div class="setting-group">
+                                        <label>Take Profit (%)</label>
+                                        <input type="number" id="take-profit" class="form-input" value="4" min="0.5" max="50" step="0.1">
+                                    </div>
+
+                                    <div class="setting-group">
+                                        <label>Günlük Max İşlem</label>
+                                        <select id="max-daily-trades" class="form-input">
+                                            <option value="5">5 İşlem</option>
+                                            <option value="10" selected>10 İşlem</option>
+                                            <option value="20">20 İşlem</option>
+                                            <option value="50">50 İşlem</option>
+                                            <option value="100">100 İşlem</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Advanced Settings -->
+                                <div class="advanced-settings">
+                                    <div class="settings-header" onclick="toggleAdvancedSettings()">
+                                        <h4>Gelişmiş Ayarlar</h4>
+                                        <button type="button" class="settings-toggle" id="advanced-toggle">
+                                            <i class="fas fa-chevron-down"></i>
+                                        </button>
+                                    </div>
+                                    <div class="advanced-settings-content" id="advanced-settings-content">
+                                        <div class="setting-group">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="auto-compound" checked>
+                                                <span>Otomatik Bileşik Faiz (Karları yeniden yatır)</span>
+                                            </label>
+                                        </div>
+                                        <div class="setting-group">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="manual-trading" checked>
+                                                <span>Manuel İşlem İzni (Botla beraber manuel işlem yapabilirsiniz)</span>
+                                            </label>
+                                        </div>
+                                        <div class="setting-group">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="notifications-enabled" checked>
+                                                <span>İşlem Bildirimleri</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Control Buttons -->
+                                <div class="control-buttons" id="control-buttons">
+                                    <button class="btn btn-success" id="start-bot-btn" disabled>
+                                        <i class="fas fa-play"></i>
+                                        Bot'u Başlat
+                                    </button>
+                                    <button class="btn btn-danger" id="stop-bot-btn" disabled>
+                                        <i class="fas fa-stop"></i>
+                                        Bot'u Durdur
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Status Message -->
+                            <div class="status-message info">
+                                <i class="fas fa-info-circle"></i>
+                                <span id="status-message-text">API anahtarlarınızı ekleyerek başlayın.</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Active Positions -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>
+                                <i class="fas fa-chart-area"></i>
+                                Aktif Pozisyonlar
+                            </h2>
+                            <button class="btn btn-outline btn-sm" id="refresh-positions-btn">
+                                <i class="fas fa-sync-alt"></i>
+                                Yenile
+                            </button>
+                        </div>
+                        
+                        <div class="card-content">
+                            <div id="positions-container">
+                                <div class="empty-state">
+                                    <i class="fas fa-chart-line"></i>
+                                    <h3>Açık Pozisyon Yok</h3>
+                                    <p>Bot başlatıldığında pozisyonlar burada görünecek</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Activity -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>
+                                <i class="fas fa-history"></i>
+                                Son İşlemler
+                            </h2>
+                            <button class="btn btn-outline btn-sm" id="refresh-activity-btn">
+                                <i class="fas fa-sync-alt"></i>
+                                Yenile
+                            </button>
+                        </div>
+                        
+                        <div class="card-content">
+                            <div id="activity-list">
+                                <div class="empty-state">
+                                    <i class="fas fa-history"></i>
+                                    <h3>Henüz İşlem Yok</h3>
+                                    <p>Bot başladığında işlemler burada görünecek</p>
                                 </div>
                             </div>
                         </div>
@@ -270,7 +374,7 @@
             <div class="mobile-menu-items">
                 <a href="#" class="mobile-menu-item" id="mobile-purchase-btn">
                     <i class="fas fa-shopping-cart"></i>
-                    <span>Satın Al</span>
+                    <span>Premium Satın Al</span>
                 </a>
                 <a href="#" class="mobile-menu-item" id="mobile-api-btn">
                     <i class="fas fa-key"></i>
@@ -279,10 +383,6 @@
                 <a href="#" class="mobile-menu-item" id="mobile-support-btn">
                     <i class="fas fa-life-ring"></i>
                     <span>Destek</span>
-                </a>
-                <a href="#" class="mobile-menu-item" id="mobile-alerts-btn">
-                    <i class="fas fa-bell"></i>
-                    <span>Uyarılar</span>
                 </a>
                 <a href="#" class="mobile-menu-item" id="mobile-logout-btn">
                     <i class="fas fa-sign-out-alt"></i>
@@ -296,35 +396,58 @@
     <div class="modal" id="api-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-key"></i> API Anahtarları</h3>
+                <h3><i class="fas fa-key"></i> Binance API Anahtarları</h3>
                 <button class="modal-close" id="api-modal-close">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             <div class="modal-body">
                 <div class="status-message info">
-                    <i class="fas fa-info-circle"></i>
-                    <span>API anahtarlarınız güvenli bir şekilde şifrelenerek saklanır.</span>
+                    <i class="fas fa-shield-alt"></i>
+                    <span>API anahtarlarınız AES-256 şifreleme ile güvenli şekilde saklanır.</span>
                 </div>
                 
                 <form id="api-form">
                     <div class="setting-group">
-                        <label>API Key</label>
-                        <input type="text" id="api-key" class="form-input" placeholder="Binance API Key" required>
+                        <label>Binance API Key</label>
+                        <input type="text" id="api-key" class="form-input" placeholder="64 karakterlik API Key" required>
                     </div>
+                    
                     <div class="setting-group">
-                        <label>API Secret</label>
-                        <input type="password" id="api-secret" class="form-input" placeholder="Binance API Secret" required>
+                        <label>Binance API Secret</label>
+                        <input type="password" id="api-secret" class="form-input" placeholder="64 karakterlik API Secret" required>
                     </div>
-                    <div style="margin: 1rem 0;">
-                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                    
+                    <!-- Server IPs -->
+                    <div class="setting-group">
+                        <label>
+                            <i class="fas fa-server"></i>
+                            Binance'a Eklenecek IP Adresleri
+                        </label>
+                        <div class="server-ips-container">
+                            <div class="server-ips-box">
+                                <div class="server-ips-text" id="server-ips-text">IP adresleri yükleniyor...</div>
+                                <button type="button" class="copy-btn" id="copy-ips-btn">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            <small class="form-help">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <strong>ÖNEMLİ:</strong> Bu IP adreslerini Binance hesabınızda 
+                                <strong>API Management → IP Access Restriction</strong> bölümüne ekleyin
+                            </small>
+                        </div>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <label class="checkbox-label">
                             <input type="checkbox" id="api-testnet">
-                            <span>Testnet kullan (test amaçlı)</span>
+                            <span>Testnet kullan (test amaçlı - gerçek para kullanılmaz)</span>
                         </label>
                     </div>
                 </form>
                 
-                <div id="api-test-result" class="status-message" style="display: none;"></div>
+                <div id="api-test-result" class="api-test-result" style="display: none;"></div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline" id="cancel-api-btn">İptal</button>
@@ -340,7 +463,7 @@
     <div class="modal" id="purchase-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-shopping-cart"></i> Premium Satın Al</h3>
+                <h3><i class="fas fa-shopping-cart"></i> Premium Abonelik</h3>
                 <button class="modal-close" id="purchase-modal-close">
                     <i class="fas fa-times"></i>
                 </button>
@@ -351,23 +474,29 @@
                     
                     <div class="status-message info">
                         <i class="fas fa-info-circle"></i>
-                        <span>Aşağıdaki TRC20 adresine ödeme yapın ve admin onayını bekleyin.</span>
+                        <span>TRC20 ağında USDT ile ödeme yapın ve işlem hash'ini bildirin.</span>
                     </div>
 
                     <div class="setting-group">
-                        <label>TRC20 Cüzdan Adresi:</label>
-                        <div class="payment-address" id="payment-address">
+                        <label>
+                            <i class="fas fa-wallet"></i>
+                            TRC20 Cüzdan Adresi:
+                        </label>
+                        <div class="payment-address">
                             <span id="payment-address-text">Yükleniyor...</span>
+                            <button type="button" class="copy-btn" id="copy-address-btn">
+                                <i class="fas fa-copy"></i>
+                            </button>
                         </div>
-                        <button class="copy-btn" id="copy-address-btn">
-                            <i class="fas fa-copy"></i>
-                            Kopyala
-                        </button>
                     </div>
 
                     <div class="setting-group" style="margin-top: 1.5rem;">
                         <label>İşlem Hash'i (Ödeme sonrası):</label>
                         <input type="text" id="transaction-hash" class="form-input" placeholder="İşlem hash'inizi buraya yapıştırın">
+                        <small class="form-help">
+                            <i class="fas fa-clock"></i>
+                            Ödeme bildirimi sonrası admin onayını bekleyin (genellikle 1-24 saat)
+                        </small>
                     </div>
                 </div>
             </div>
@@ -385,45 +514,40 @@
     <div class="modal" id="support-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-life-ring"></i> Destek</h3>
+                <h3><i class="fas fa-life-ring"></i> Teknik Destek</h3>
                 <button class="modal-close" id="support-modal-close">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             <div class="modal-body">
                 <div class="status-message info">
-                    <i class="fas fa-info-circle"></i>
-                    <span>Herhangi bir sorun yaşıyorsanız bizimle iletişime geçin.</span>
+                    <i class="fas fa-headset"></i>
+                    <span>7/24 teknik destek hizmeti. Sorununuzu detaylı açıklayın.</span>
                 </div>
                 
                 <div class="setting-group">
-                    <label>E-posta:</label>
-                    <div style="padding: 0.75rem; background: var(--background); border-radius: var(--border-radius); border: 1px solid var(--border);">
-                        bilwininc@gmail.com
-                    </div>
-                </div>
-
-                <div class="setting-group">
                     <label>Konu:</label>
-                    <select id="support-subject" class="form-input">
+                    <select id="support-subject" class="form-input" required>
                         <option value="">Konu seçin</option>
-                        <option value="api">API Sorunu</option>
-                        <option value="bot">Bot Sorunu</option>
+                        <option value="api">API Bağlantı Sorunu</option>
+                        <option value="bot">Bot Çalışma Sorunu</option>
                         <option value="payment">Ödeme Sorunu</option>
+                        <option value="trading">Trading Sorunu</option>
+                        <option value="account">Hesap Sorunu</option>
                         <option value="other">Diğer</option>
                     </select>
                 </div>
 
                 <div class="setting-group">
-                    <label>Mesaj:</label>
-                    <textarea id="support-message" class="form-input" style="min-height: 100px; resize: vertical;" placeholder="Sorununuzu detaylı şekilde açıklayın..."></textarea>
+                    <label>Mesajınız:</label>
+                    <textarea id="support-message" class="form-input support-message" placeholder="Sorununuzu detaylı şekilde açıklayın..." required></textarea>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline" id="cancel-support-btn">İptal</button>
                 <button class="btn btn-primary" id="send-support-btn">
                     <i class="fas fa-paper-plane"></i>
-                    Gönder
+                    Destek Talebi Gönder
                 </button>
             </div>
         </div>
@@ -434,10 +558,10 @@
         <div class="toast-content">
             <i class="toast-icon fas fa-info-circle"></i>
             <div class="toast-message" id="toast-message">Bildirim mesajı</div>
-            <button class="toast-close" id="toast-close">
-                <i class="fas fa-times"></i>
-            </button>
         </div>
+        <button class="toast-close" id="toast-close">
+            <i class="fas fa-times"></i>
+        </button>
     </div>
 
     <!-- Firebase Scripts -->
@@ -450,5 +574,21 @@
     
     <!-- Dashboard JavaScript -->
     <script src="/static/dashboard.js"></script>
+
+    <script>
+        // Global functions for HTML onclick events
+        function toggleAdvancedSettings() {
+            const content = document.getElementById('advanced-settings-content');
+            const toggle = document.getElementById('advanced-toggle');
+            
+            if (content.classList.contains('show')) {
+                content.classList.remove('show');
+                toggle.innerHTML = '<i class="fas fa-chevron-down"></i>';
+            } else {
+                content.classList.add('show');
+                toggle.innerHTML = '<i class="fas fa-chevron-up"></i>';
+            }
+        }
+    </script>
 </body>
 </html>
