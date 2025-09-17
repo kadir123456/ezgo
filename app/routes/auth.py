@@ -1,37 +1,93 @@
-from fastapi import APIRouter, HTTPException, Depends
-from fastapi.security import HTTPBearer
+from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.firebase_manager import firebase_manager
 from app.utils.validation import LoginRequest, RegisterRequest
+from app.utils.logger import get_logger
 import firebase_admin
 from firebase_admin import auth as firebase_auth
-import logging
+from typing import Optional
 
-logger = logging.getLogger("auth_routes")
+logger = get_logger("auth_routes")
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
-async def get_current_user(token: str = Depends(security)):
-    """JWT token'dan kullanıcı bilgilerini al"""
+async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """Firebase Auth token'dan kullanıcı bilgilerini al"""
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Authentication token required")
+    
     try:
-        decoded_token = firebase_auth.verify_id_token(token.credentials)
+        # Firebase token'ı verify et
+        decoded_token = firebase_auth.verify_id_token(credentials.credentials)
+        logger.info(f"Token verified for user: {decoded_token['uid']}")
         return decoded_token
     except Exception as e:
         logger.error(f"Token verification failed: {e}")
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
 
-@router.post("/verify-token")
-async def verify_token(token: str = Depends(security)):
+@router.post("/verify")
+async def verify_token(current_user: dict = Depends(get_current_user)):
     """Firebase token doğrulama"""
     try:
-        decoded_token = firebase_auth.verify_id_token(token.credentials)
+        user_id = current_user['uid']
+        email = current_user.get('email')
+        
+        # Kullanıcı verilerini Firebase'den al
+        user_data = firebase_manager.get_user_data(user_id)
+        
+        # Eğer kullanıcı verisi yoksa oluştur
+        if not user_data:
+            logger.info(f"Creating user data for new user: {user_id}")
+            user_data = {
+                "email": email,
+                "created_at": firebase_manager.get_server_timestamp(),
+                "last_login": firebase_manager.get_server_timestamp(),
+                "subscription_status": "trial",
+                "api_keys_set": False,
+                "bot_active": False,
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "role": "user"
+            }
+            firebase_manager.update_user_data(user_id, user_data)
+        else:
+            # Son giriş zamanını güncelle
+            firebase_manager.update_user_data(user_id, {
+                "last_login": firebase_manager.get_server_timestamp()
+            })
+        
         return {
             "success": True,
-            "user_id": decoded_token['uid'],
-            "email": decoded_token.get('email')
+            "user_id": user_id,
+            "email": email,
+            "user_data": user_data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Token verification error: {e}")
+        raise HTTPException(status_code=500, detail="Token verification failed")
+
+@router.post("/logout")
+async def logout(current_user: dict = Depends(get_current_user)):
+    """Kullanıcı çıkışı"""
+    try:
+        user_id = current_user['uid']
+        
+        # Son çıkış zamanını kaydet
+        firebase_manager.update_user_data(user_id, {
+            "last_logout": firebase_manager.get_server_timestamp()
+        })
+        
+        logger.info(f"User logged out: {user_id}")
+        
+        return {
+            "success": True,
+            "message": "Başarıyla çıkış yapıldı"
         }
     except Exception as e:
-        logger.error(f"Token verification failed: {e}")
-        raise HTTPException(status_code=401, detail="Invalid token")
+        logger.error(f"Logout error: {e}")
+        raise HTTPException(status_code=500, detail="Çıkış işlemi başarısız")
 
 @router.get("/user-info")
 async def get_user_info(current_user: dict = Depends(get_current_user)):
@@ -52,7 +108,9 @@ async def get_user_info(current_user: dict = Depends(get_current_user)):
             "api_keys_set": user_data.get("api_keys_set", False),
             "total_trades": user_data.get("total_trades", 0),
             "total_pnl": user_data.get("total_pnl", 0.0),
-            "role": user_data.get("role", "user")
+            "role": user_data.get("role", "user"),
+            "created_at": user_data.get("created_at"),
+            "last_login": user_data.get("last_login")
         }
         
         return safe_user_data
