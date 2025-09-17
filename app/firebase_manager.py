@@ -3,9 +3,9 @@ from firebase_admin import credentials, db, auth
 import os
 import json
 from datetime import datetime
-from .utils.logger import get_logger
+import logging
 
-logger = get_logger("firebase_manager")
+logger = logging.getLogger("firebase_manager")
 
 class FirebaseManager:
     def __init__(self):
@@ -21,10 +21,11 @@ class FirebaseManager:
                     firebase_admin.initialize_app(cred, {'databaseURL': database_url})
                     logger.info("Firebase Admin SDK initialized successfully")
                 else:
-                    logger.warning("Firebase credentials not found")
+                    logger.warning("Firebase credentials not found in environment")
             if firebase_admin._apps:
                 self.db_ref = db.reference('trades')
                 self.db = db
+                logger.info("Firebase database reference created")
         except Exception as e:
             logger.error(f"Firebase initialization error: {e}")
 
