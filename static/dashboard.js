@@ -167,6 +167,8 @@ function updateApiStatus(hasKeys = false, isConnected = false) {
     const manageApiBtn = document.getElementById('manage-api-btn');
     const controlButtons = document.getElementById('control-buttons');
     const tradingSettings = document.getElementById('trading-settings');
+    const startBtn = document.getElementById('start-bot-btn');
+    const stopBtn = document.getElementById('stop-bot-btn');
     
     apiKeysConfigured = hasKeys && isConnected;
     
@@ -177,18 +179,30 @@ function updateApiStatus(hasKeys = false, isConnected = false) {
                 <span>API bağlantısı aktif</span>
             `;
             apiStatusIndicator.className = 'api-status-indicator connected';
+            
+            // Show trading controls when API is connected
+            if (controlButtons) controlButtons.style.display = 'grid';
+            if (tradingSettings) tradingSettings.style.display = 'block';
         } else if (hasKeys && !isConnected) {
             apiStatusIndicator.innerHTML = `
                 <i class="fas fa-exclamation-triangle"></i>
                 <span>API bağlantı hatası</span>
             `;
             apiStatusIndicator.className = 'api-status-indicator error';
+            
+            // Hide trading controls when API has error
+            if (controlButtons) controlButtons.style.display = 'none';
+            if (tradingSettings) tradingSettings.style.display = 'none';
         } else {
             apiStatusIndicator.innerHTML = `
                 <i class="fas fa-key"></i>
                 <span>API anahtarları gerekli</span>
             `;
             apiStatusIndicator.className = 'api-status-indicator error';
+            
+            // Hide trading controls when no API keys
+            if (controlButtons) controlButtons.style.display = 'none';
+            if (tradingSettings) tradingSettings.style.display = 'none';
         }
     }
     
@@ -196,16 +210,25 @@ function updateApiStatus(hasKeys = false, isConnected = false) {
         manageApiBtn.textContent = hasKeys ? 'API Anahtarlarını Düzenle' : 'API Anahtarlarını Ekle';
     }
     
-    if (controlButtons) {
-        controlButtons.style.display = apiKeysConfigured ? 'grid' : 'none';
+    // Bot butonlarını aktif/pasif yap
+    if (startBtn) {
+        startBtn.disabled = !apiKeysConfigured || botRunning;
+    }
+    if (stopBtn) {
+        stopBtn.disabled = !botRunning;
     }
     
-    if (tradingSettings) {
-        tradingSettings.style.display = apiKeysConfigured ? 'block' : 'none';
+    // Status mesajını güncelle
+    const statusMessageText = document.getElementById('status-message-text');
+    if (statusMessageText) {
+        if (apiKeysConfigured) {
+            statusMessageText.textContent = 'API bağlantısı aktif. Bot ayarlarını yapıp başlatabilirsiniz.';
+        } else if (hasKeys && !isConnected) {
+            statusMessageText.textContent = 'API anahtarları kayıtlı ancak bağlantı hatası var. Lütfen kontrol edin.';
+        } else {
+            statusMessageText.textContent = 'Bot\'u çalıştırmak için API anahtarlarınızı eklemelisiniz.';
+        }
     }
-    
-    // Update start button
-    updateBotStatus(botRunning);
 }
 
 // Update account stats
@@ -260,14 +283,14 @@ async function loadPaymentInfo() {
         
         // Update payment amount
         const paymentAmount = document.getElementById('payment-amount');
-        if (paymentAmount && appInfo.bot_price) {
-            paymentAmount.textContent = `$${appInfo.bot_price}/Ay`;
+        if (paymentAmount && appInfo.monthly_price) {
+            paymentAmount.textContent = `$${appInfo.monthly_price}/Ay`;
         }
         
         // Update server IPs
         const serverIpsText = document.getElementById('server-ips-text');
-        if (serverIpsText && appInfo.server_ips) {
-            serverIpsText.textContent = appInfo.server_ips;
+        if (serverIpsText && appInfo.server_ips && Array.isArray(appInfo.server_ips)) {
+            serverIpsText.textContent = appInfo.server_ips.join(', ');
         } else if (serverIpsText) {
             serverIpsText.textContent = 'Server IP bilgisi bulunamadı';
         }
@@ -832,7 +855,7 @@ async function sendPaymentNotification(transactionHash) {
             user_id: currentUser.uid,
             user_email: userData.email,
             transaction_hash: transactionHash,
-            amount: appInfo.monthly_price || 15,
+            amount: appInfo.bot_price || 15,
             currency: 'USDT',
             network: 'TRC20',
             status: 'pending',
@@ -1251,6 +1274,9 @@ async function initializeDashboard() {
             });
         });
         
+        // Load saved settings
+        loadSavedSettings();
+        
         // Setup event handlers
         setupEventHandlers();
         
@@ -1267,6 +1293,11 @@ async function initializeDashboard() {
         }
         
         showToast('Dashboard başarıyla yüklendi!', 'success');
+        
+        // Start auto-refresh if bot is running
+        if (userData && userData.bot_active) {
+            startDataRefresh();
+        }
         
         // Start auto-refresh if bot is running
         if (userData && userData.bot_active) {
