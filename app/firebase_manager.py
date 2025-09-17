@@ -25,12 +25,18 @@ class FirebaseManager:
                     logger.error("Firebase credentials not found in environment")
                     return
                 
-                # JSON string'i temizle
+                # JSON string'i temizle ve normalize et
                 if cred_json_str.startswith('"') and cred_json_str.endswith('"'):
                     cred_json_str = cred_json_str[1:-1]  # Remove outer quotes
                 
                 # Escape karakterleri düzelt
                 cred_json_str = cred_json_str.replace('\\n', '\n')
+                cred_json_str = cred_json_str.replace('\\"', '"')
+                cred_json_str = cred_json_str.replace('\\\\', '\\')
+                
+                # Control karakterleri temizle
+                import re
+                cred_json_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', cred_json_str)
                 
                 cred_dict = json.loads(cred_json_str)
                 cred = credentials.Certificate(cred_dict)
