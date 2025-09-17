@@ -93,9 +93,11 @@ async def startup_event():
         if firebase_manager.is_initialized():
             logger.info("Firebase connection verified")
         else:
-            logger.warning("Firebase connection failed")
+            logger.error("Firebase connection failed - check FIREBASE_CREDENTIALS_JSON")
+            logger.error("Make sure Firebase credentials are properly formatted in environment")
     except Exception as e:
-        logger.error(f"Firebase check error: {e}")
+        logger.error(f"Firebase initialization error: {e}")
+        logger.error("Check FIREBASE_CREDENTIALS_JSON format and content")
     
     # Ayarları doğrula
     try:
