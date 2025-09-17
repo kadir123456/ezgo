@@ -1,19 +1,15 @@
 import time
 from typing import Dict, List
 from fastapi import Request, HTTPException
-from app.utils.logger import get_logger
+import logging
 
-logger = get_logger("rate_limiter")
+logger = logging.getLogger("rate_limiter")
 
 class RateLimiter:
-    """Basit rate limiter"""
+    """Simple rate limiter"""
     
     def __init__(self):
         self.requests: Dict[str, List[float]] = {}
-        
-    def init_app(self, app):
-        """FastAPI app'e rate limiter ekle"""
-        self.app = app
         
     async def check_request_limit(self, request: Request, limit_str: str):
         """Rate limit kontrolü yapar"""
@@ -47,7 +43,7 @@ class RateLimiter:
             
             # Limit kontrolü
             if len(self.requests[client_ip]) >= count:
-                logger.warning(f"Rate limit exceeded", client_ip=client_ip, limit=limit_str)
+                logger.warning(f"Rate limit exceeded for {client_ip}")
                 raise HTTPException(status_code=429, detail="Rate limit exceeded")
                 
             # İsteği kaydet
@@ -56,13 +52,9 @@ class RateLimiter:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Rate limit check error", error=str(e))
+            logger.error(f"Rate limit check error: {e}")
             # Hata durumunda geçir
             pass
 
 # Global limiter
 limiter = RateLimiter()
-
-async def rate_limit_exceeded_handler(request: Request, exc: HTTPException):
-    """Rate limit aşıldığında çağrılır"""
-    return {"error": "Rate limit exceeded", "detail": "Too many requests"}
