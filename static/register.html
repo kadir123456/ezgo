@@ -169,7 +169,8 @@
                 }
                 
                 const firebaseConfig = await response.json();
-                console.log('Firebase config received:', firebaseConfig);
+                console.log('Firebase config received from backend');
+                // GÜVENLİK: Firebase config'i console'da gösterme
                 
                 // Required fields kontrolü
                 const requiredFields = ['apiKey', 'authDomain', 'projectId', 'appId'];
@@ -360,7 +361,7 @@
                     bot_active: false,
                     total_trades: 0,
                     total_pnl: 0,
-                    role: 'user', // Default role
+                    role: 'user',
                     settings: {
                         language: 'tr',
                         timezone: 'Europe/Istanbul',
@@ -373,7 +374,15 @@
                 
                 // Save to database
                 const userRef = database.ref(`users/${user.uid}`);
-                await userRef.set(userData);
+                
+                try {
+                    await userRef.set(userData);
+                    console.log('User data saved to Firebase successfully');
+                } catch (dbError) {
+                    console.error('Database save error:', dbError);
+                    // Even if database save fails, continue with registration
+                    // User can still login and data will be created later
+                }
                 
                 showSuccess('Hesabınız başarıyla oluşturuldu! Yönlendiriliyorsunuz...');
                 
