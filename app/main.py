@@ -201,7 +201,7 @@ async def get_app_info():
         "demo_mode": settings.DEMO_MODE_ENABLED,
         "maintenance_mode": settings.MAINTENANCE_MODE,
         "payment_address": settings.PAYMENT_TRC20_ADDRESS,
-        "server_ips": settings.SERVER_IPS,
+        "server_ips": settings.SERVER_IPS.split(',') if settings.SERVER_IPS else [],
         "max_bots_per_user": settings.MAX_BOTS_PER_USER,
         "supported_timeframes": ["1m", "5m", "15m", "30m", "1h", "4h", "1d"],
         "leverage_range": {"min": settings.MIN_LEVERAGE, "max": settings.MAX_LEVERAGE},
