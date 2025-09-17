@@ -227,24 +227,38 @@ async def read_root():
 async def read_login():
     return FileResponse("static/login.html")
 
+@app.get("/login.html")
+async def read_login_html():
+    return FileResponse("static/login.html")
 @app.get("/register")
 async def read_register():
     return FileResponse("static/register.html")
 
+@app.get("/register.html")
+async def read_register_html():
+    return FileResponse("static/register.html")
 @app.get("/dashboard")
 async def read_dashboard():
     return FileResponse("static/dashboard.html")
 
+@app.get("/dashboard.html")
+async def read_dashboard_html():
+    return FileResponse("static/dashboard.html")
 @app.get("/admin")
 async def read_admin():
     return FileResponse("static/admin.html")
 
+@app.get("/admin.html")
+async def read_admin_html():
+    return FileResponse("static/admin.html")
 # Catch-all route for SPA
 @app.get("/{full_path:path}")
 async def catch_all(full_path: str):
     """Catch-all route for SPA routing"""
-    # Check if it's a static file request
-    if full_path.startswith("static/"):
+    # Check if it's a static file request or known HTML file
+    if (full_path.startswith("static/") or 
+        full_path.endswith(".html") or
+        full_path in ["dashboard", "login", "register", "admin"]):
         raise HTTPException(status_code=404, detail="File not found")
     
     # For other paths, serve index.html (SPA routing)
