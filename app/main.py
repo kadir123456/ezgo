@@ -150,18 +150,26 @@ async def health_check():
 async def get_firebase_config():
     """Frontend için Firebase konfigürasyonu"""
     try:
+        logger.info("Firebase config requested from frontend")
+        
         firebase_web_config = settings.get_firebase_web_config()
         
         # Eksik alanları kontrol et
-        missing_fields = [k for k, v in firebase_web_config.items() if not v]
+        required_fields = ["apiKey", "authDomain", "projectId", "appId"]
+        missing_fields = [k for k in required_fields if not firebase_web_config.get(k)]
+        
         if missing_fields:
             logger.warning(f"Missing Firebase config fields: {missing_fields}")
-            raise HTTPException(status_code=500, detail=f"Missing Firebase config: {missing_fields}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Firebase configuration incomplete. Missing: {', '.join(missing_fields)}"
+            )
         
+        logger.info(f"Firebase config loaded successfully for project: {firebase_web_config.get('projectId', 'unknown')}")
         return firebase_web_config
     except Exception as e:
         logger.error(f"Firebase config error: {e}")
-        raise HTTPException(status_code=500, detail="Firebase configuration error")
+        raise HTTPException(status_code=500, detail=f"Firebase configuration error: {str(e)}")
 
 # App info endpoint
 @app.get("/api/app-info")
