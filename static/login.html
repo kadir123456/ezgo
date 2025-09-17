@@ -111,21 +111,27 @@
     <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-database-compat.js"></script>
     
     <script>
-        // Firebase Config - Bu bilgileri kendi Firebase projenizden alın
-        const firebaseConfig = {
-            apiKey: "YOUR_API_KEY_HERE",
-            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-            databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com/",
-            projectId: "YOUR_PROJECT_ID",
-            storageBucket: "YOUR_PROJECT_ID.appspot.com",
-            messagingSenderId: "123456789",
-            appId: "1:123456789:web:abcdef123456"
-        };
+        // Firebase configuration will be loaded from backend
+        let firebaseApp = null;
+        let auth = null;
+        let database = null;
 
-        // Firebase Initialize
-        firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const database = firebase.database();
+        // Initialize Firebase with config from backend
+        async function initializeFirebase() {
+            try {
+                const firebaseConfig = await window.configLoader.getFirebaseConfig();
+                
+                firebaseApp = firebase.initializeApp(firebaseConfig);
+                auth = firebase.auth();
+                database = firebase.database();
+                
+                console.log('Firebase initialized successfully');
+                return true;
+            } catch (error) {
+                console.error('Firebase initialization failed:', error);
+                return false;
+            }
+        }
 
         let isLoading = false;
 
@@ -307,9 +313,18 @@
         });
 
         // Event listeners
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Initialize Firebase first
+            const firebaseInitialized = await initializeFirebase();
+            if (!firebaseInitialized) {
+                showError('Sistem başlatılamadı. Lütfen sayfayı yenileyin.');
+                return;
+            }
+            
             initPasswordToggle();
-            loginForm.addEventListener('submit', handleLogin);
+            if (loginForm) {
+                loginForm.addEventListener('submit', handleLogin);
+            }
         });
     </script>
 </body>
