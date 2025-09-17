@@ -145,6 +145,16 @@ async def health_check():
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
+# HEAD method support for health check
+@app.head("/")
+async def head_root():
+    """HEAD method support for root endpoint"""
+    return {}
+
+@app.head("/health")
+async def head_health():
+    """HEAD method support for health endpoint"""
+    return {}
 # Firebase config endpoint for frontend
 @app.get("/api/firebase-config")
 async def get_firebase_config():
