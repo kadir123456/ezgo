@@ -442,15 +442,23 @@ async function extendSubscription(userId, userEmail) {
         if (!userData) throw new Error('Kullanıcı bulunamadı');
         
         const now = new Date();
-        const currentExpiry = userData.subscription_expiry ? new Date(userData.subscription_expiry) : now;
-        const baseDate = currentExpiry > now ? currentExpiry : now;
+        let baseDate;
+        
+        if (userData.subscription_expiry) {
+            const currentExpiry = new Date(userData.subscription_expiry);
+            baseDate = currentExpiry > now ? currentExpiry : now;
+        } else {
+            baseDate = now;
+        }
+        
         const newExpiryDate = new Date(baseDate.getTime() + (30 * 24 * 60 * 60 * 1000));
         
         await userRef.update({
-            subscription_expiry: newExpiryDate.getTime(),
+            subscription_expiry: newExpiryDate.toISOString(),
             subscription_status: 'active',
             subscription_extended_by: currentUser.email,
             subscription_extended_at: firebase.database.ServerValue.TIMESTAMP,
+            subscription_extended_days: 30,
             last_updated: firebase.database.ServerValue.TIMESTAMP,
             updated_by: currentUser.email
         });
@@ -501,15 +509,23 @@ async function approvePayment(paymentId) {
             
             if (userData) {
                 const now = new Date();
-                const currentExpiry = userData.subscription_expiry ? new Date(userData.subscription_expiry) : now;
-                const baseDate = currentExpiry > now ? currentExpiry : now;
+                let baseDate;
+                
+                if (userData.subscription_expiry) {
+                    const currentExpiry = new Date(userData.subscription_expiry);
+                    baseDate = currentExpiry > now ? currentExpiry : now;
+                } else {
+                    baseDate = now;
+                }
+                
                 const newExpiryDate = new Date(baseDate.getTime() + (30 * 24 * 60 * 60 * 1000));
                 
                 await userRef.update({
-                    subscription_expiry: newExpiryDate.getTime(),
+                    subscription_expiry: newExpiryDate.toISOString(),
                     subscription_status: 'active',
                     payment_approved_by: currentUser.email,
                     payment_approved_at: firebase.database.ServerValue.TIMESTAMP,
+                    payment_approved_days: 30,
                     last_updated: firebase.database.ServerValue.TIMESTAMP
                 });
                 
@@ -583,6 +599,107 @@ async function markSupportResolved(messageId) {
     } catch (error) {
         console.error('Error marking support resolved:', error);
         showToast('Durum güncellenirken hata: ' + error.message, 'error');
+    }
+}
+
+function showBulkActionsModal() {
+    const modal = document.getElementById('bulk-actions-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function exportUserData() {
+    try {
+        const usersData = [];
+        const tableRows = document.querySelectorAll('#users-table-body tr');
+        
+        tableRows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 4) {
+                usersData.push({
+                    email: cells[0].querySelector('.email-text')?.textContent || '',
+                    subscription: cells[1].textContent.trim(),
+                    expiry: cells[2].querySelector('.expiry-date')?.textContent || '',
+                    userId: cells[3].textContent.trim()
+                });
+            }
+        });
+        
+        const csvContent = "data:text/csv;charset=utf-8," 
+            + "Email,Subscription,Expiry,UserID\n"
+            + usersData.map(user => `${user.email},${user.subscription},${user.expiry},${user.userId}`).join('\n');
+        
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `users_export_${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        showToast('Kullanıcı verileri CSV olarak indirildi', 'success');
+    } catch (error) {
+        console.error('Export error:', error);
+        showToast('Veri dışa aktarma hatası: ' + error.message, 'error');
+    }
+}
+
+// Execute bulk action
+async function executeBulkAction() {
+    const actionType = document.getElementById('bulk-action-type').value;
+    const days = parseInt(document.getElementById('bulk-days').value);
+    
+    if (!confirm(`${actionType} işlemini ${days} gün ile yapmak istediğinizden emin misiniz?`)) return;
+    
+    try {
+        showToast('Toplu işlem başlatılıyor...', 'info');
+        
+        const usersRef = database.ref('users');
+        const snapshot = await usersRef.once('value');
+        const usersData = snapshot.val();
+        
+        if (!usersData) {
+            showToast('Kullanıcı bulunamadı', 'error');
+            return;
+        }
+        
+        const users = Object.entries(usersData);
+        let processedCount = 0;
+        
+        for (const [userId, userData] of users) {
+            try {
+                const now = new Date();
+                let newExpiryDate;
+                
+                if (actionType === 'extend_trial') {
+                    const currentExpiry = userData.subscription_expiry ? new Date(userData.subscription_expiry) : now;
+                    const baseDate = currentExpiry > now ? currentExpiry : now;
+                    newExpiryDate = new Date(baseDate.getTime() + (days * 24 * 60 * 60 * 1000));
+                    
+                    await usersRef.child(userId).update({
+                        subscription_expiry: newExpiryDate.toISOString(),
+                        subscription_status: 'active',
+                        bulk_action_by: currentUser.email,
+                        bulk_action_at: firebase.database.ServerValue.TIMESTAMP,
+                        bulk_action_type: actionType,
+                        bulk_action_days: days
+                    });
+                }
+                
+                processedCount++;
+            } catch (error) {
+                console.error(`Error processing user ${userId}:`, error);
+            }
+        }
+        
+        showToast(`✅ Toplu işlem tamamlandı! ${processedCount} kullanıcı işlendi.`, 'success');
+        closeModal('bulk-actions-modal');
+        
+        // Reload users
+        setTimeout(loadUsers, 1000);
+        
+    } catch (error) {
+        console.error('Bulk action error:', error);
+        showToast('Toplu işlem hatası: ' + error.message, 'error');
     }
 }
 
@@ -665,22 +782,40 @@ async function checkAdminAuth() {
                     const snapshot = await userRef.once('value');
                     const userData = snapshot.val();
                     
-                    if (userData && userData.role === 'admin') {
+                    // Check if user email is admin email OR has admin role
+                    const adminEmail = 'admin@epostaniz.com';
+                    const isAdminEmail = user.email === adminEmail;
+                    const hasAdminRole = userData && userData.role === 'admin';
+                    
+                    if (isAdminEmail || hasAdminRole) {
                         currentUser = user;
                         console.log('Admin authenticated:', user.email);
+                        
+                        // If admin email but no admin role in DB, set it
+                        if (isAdminEmail && !hasAdminRole) {
+                            await userRef.update({
+                                role: 'admin',
+                                admin_set_at: firebase.database.ServerValue.TIMESTAMP
+                            });
+                            console.log('Admin role set in database');
+                        }
+                        
                         resolve(true);
                     } else {
-                        showToast('Admin yetkisi bulunamadı. Dashboard\'a yönlendiriliyorsunuz.', 'error');
+                        console.log(`User ${user.email} is not admin`);
+                        showToast('⛔ Admin yetkisi bulunamadı. Dashboard\'a yönlendiriliyorsunuz.', 'error');
                         setTimeout(() => window.location.href = '/dashboard.html', 3000);
                         resolve(false);
                     }
                 } catch (error) {
                     console.error('Admin verification failed:', error);
-                    showToast('Yetki kontrolü başarısız.', 'error');
+                    showToast('⚠️ Yetki kontrolü başarısız. Lütfen tekrar giriş yapın.', 'error');
+                    setTimeout(() => window.location.href = '/login.html', 2000);
                     resolve(false);
                 }
             } else {
-                showToast('Giriş yapılmamış. Yönlendiriliyor...', 'error');
+                console.log('No user logged in for admin panel');
+                showToast('🔐 Giriş yapılmamış. Login sayfasına yönlendiriliyorsunuz...', 'error');
                 setTimeout(() => window.location.href = '/login.html', 2000);
                 resolve(false);
             }
