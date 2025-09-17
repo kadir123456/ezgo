@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
 from fastapi.security import HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict
 import logging
@@ -225,11 +226,48 @@ class BotManager:
 
 # FastAPI uygulama başlatma
 app = FastAPI()
+
+# CORS middleware ekle
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Production'da specific domains kullanın
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 bot_manager = BotManager()
 
 @app.on_event("startup")
 async def startup_event():
     await firebase_manager.initialize_firebase()
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "environment": settings.ENVIRONMENT
+    }
+
+# Firebase config endpoint for frontend
+@app.get("/api/firebase-config")
+async def get_firebase_config():
+    try:
+        firebase_web_config = {
+            "apiKey": os.getenv("FIREBASE_WEB_API_KEY"),
+            "authDomain": os.getenv("FIREBASE_WEB_AUTH_DOMAIN"),
+            "databaseURL": os.getenv("FIREBASE_DATABASE_URL"),
+            "projectId": os.getenv("FIREBASE_WEB_PROJECT_ID"),
+            "storageBucket": os.getenv("FIREBASE_WEB_STORAGE_BUCKET"),
+            "messagingSenderId": os.getenv("FIREBASE_WEB_MESSAGING_SENDER_ID"),
+            "appId": os.getenv("FIREBASE_WEB_APP_ID")
+        }
+        return firebase_web_config
+    except Exception as e:
+        logger.error(f"Firebase config error: {e}")
+        raise HTTPException(status_code=500, detail="Firebase configuration error")
 
 @app.post("/api/start-bot")
 async def start_bot_endpoint(start_req: dict, user_id: str = "example_user_id"): # TODO: Gerçek kullanıcı kimliği doğrulama
@@ -266,24 +304,41 @@ async def load_settings_endpoint(user_id: str = "example_user_id"):
     return settings
 
 # ============ STATIC FILES ===========
+# Static dosyaları mount et
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Root route - ana sayfa
 @app.get("/")
-def read_root():
-    return FileResponse("index.html")
+async def read_root():
+    return FileResponse("static/index.html")
 
+# Login sayfası
 @app.get("/login")
-def read_login():
-    return FileResponse("login.html")
+async def read_login():
+    return FileResponse("static/login.html")
     
+# Dashboard sayfası
 @app.get("/dashboard")
-def read_dashboard():
-    return FileResponse("dashboard.html")
+async def read_dashboard():
+    return FileResponse("static/dashboard.html")
 
+# Register sayfası
 @app.get("/register")
-def read_register():
-    return FileResponse("register.html")
+async def read_register():
+    return FileResponse("static/register.html")
 
+# Admin sayfası
 @app.get("/admin")
-def read_admin():
-    return FileResponse("admin.html")
+async def read_admin():
+    return FileResponse("static/admin.html")
+
+# Catch-all route for SPA routing
+@app.get("/{full_path:path}")
+async def catch_all(full_path: str):
+    # Eğer dosya static klasöründe varsa onu döndür
+    static_file_path = f"static/{full_path}"
+    if os.path.exists(static_file_path) and os.path.isfile(static_file_path):
+        return FileResponse(static_file_path)
+    
+    # Aksi halde ana sayfayı döndür (SPA routing için)
+    return FileResponse("static/index.html")
