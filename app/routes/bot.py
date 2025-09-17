@@ -36,12 +36,23 @@ async def start_bot(
         # Kullanıcının abonelik durumunu kontrol et
         user_data = firebase_manager.get_user_data(user_id)
         if not user_data:
-            raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+            # Kullanıcı verisi yoksa oluştur
+            user_data = {
+                "email": current_user.get('email'),
+                "subscription_status": "trial",
+                "api_keys_set": False,
+                "created_at": firebase_manager.get_server_timestamp()
+            }
+            firebase_manager.update_user_data(user_id, user_data)
         
         # Abonelik kontrolü
         subscription_status = user_data.get('subscription_status')
         if subscription_status not in ['trial', 'active']:
             raise HTTPException(status_code=403, detail="Aktif abonelik gerekli")
+        
+        # API keys kontrolü
+        if not user_data.get('api_keys_set'):
+            raise HTTPException(status_code=400, detail="Önce API anahtarlarınızı kaydedin")
         
         # Bot'u başlat
         result = await bot_manager.start_bot_for_user(user_id, request)
