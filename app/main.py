@@ -149,12 +149,13 @@ async def health_check():
 @app.head("/")
 async def head_root():
     """HEAD method support for root endpoint"""
-    return {}
+    return JSONResponse(content={})
 
 @app.head("/health")
 async def head_health():
     """HEAD method support for health endpoint"""
-    return {}
+    return JSONResponse(content={})
+
 # Firebase config endpoint for frontend
 @app.get("/api/firebase-config")
 async def get_firebase_config():
