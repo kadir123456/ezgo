@@ -6,7 +6,7 @@ load_dotenv()
 class Settings:
     # --- Environment Ayarları ---
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "LIVE")
-    DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
+    DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"  # Development için True
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     MAINTENANCE_MODE: bool = os.getenv("MAINTENANCE_MODE", "False").lower() == "true"
     MAINTENANCE_MESSAGE: str = os.getenv("MAINTENANCE_MESSAGE", "Sistem bakımda.")
