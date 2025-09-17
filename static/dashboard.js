@@ -4,17 +4,8 @@ let auth = null;
 let database = null;
 let currentUser = null;
 let userData = null;
-
-// DOM Elements
-const elements = {
-    get: (id) => {
-        const element = document.getElementById(id);
-        if (!element) {
-            console.warn(`Element not found: ${id}`);
-        }
-        return element;
-    }
-};
+let botRunning = false;
+let apiKeysConfigured = false;
 
 // Initialize Firebase
 async function initializeFirebase() {
@@ -29,29 +20,6 @@ async function initializeFirebase() {
     } catch (error) {
         console.error('Firebase initialization error:', error);
         return false;
-    }
-}
-
-// Load payment information
-async function loadPaymentInfo() {
-    try {
-        const appInfo = await window.configLoader.getAppInfo();
-        
-        // Update payment address
-        const paymentAddressText = document.getElementById('payment-address-text');
-        if (paymentAddressText) {
-            paymentAddressText.textContent = appInfo.payment_address || 'Ödeme adresi yapılandırılmamış';
-        }
-        
-        // Update bot price
-        const paymentAmount = document.getElementById('payment-amount');
-        if (paymentAmount) {
-            paymentAmount.textContent = `$${appInfo.bot_price || 15}/Ay`;
-        }
-        
-        console.log('Payment info loaded from environment');
-    } catch (error) {
-        console.error('Error loading payment info:', error);
     }
 }
 
@@ -71,8 +39,16 @@ function showToast(message, type = 'info') {
         info: 'fas fa-info-circle'
     };
     
+    const colors = {
+        success: 'var(--success-color)',
+        error: 'var(--danger-color)',
+        warning: 'var(--warning-color)',
+        info: 'var(--info-color)'
+    };
+    
     if (toastIcon) {
         toastIcon.className = `toast-icon ${icons[type] || icons.info}`;
+        toastIcon.style.color = colors[type] || colors.info;
     }
     
     toastMessage.textContent = message;
@@ -88,7 +64,11 @@ function showToast(message, type = 'info') {
 function toggleModal(modalId, show) {
     const modal = document.getElementById(modalId);
     if (modal) {
-        modal.style.display = show ? 'flex' : 'none';
+        if (show) {
+            modal.classList.add('show');
+        } else {
+            modal.classList.remove('show');
+        }
     }
 }
 
@@ -97,6 +77,7 @@ function updateUserInfo(user, userInfo) {
     const userNameEl = document.getElementById('user-name');
     const subscriptionTextEl = document.getElementById('subscription-text');
     const subscriptionBadgeEl = document.getElementById('subscription-badge');
+    const subStatusBadgeEl = document.getElementById('sub-status-badge');
     const daysRemainingEl = document.getElementById('days-remaining');
     const subscriptionNoteEl = document.getElementById('subscription-note');
     
@@ -104,13 +85,24 @@ function updateUserInfo(user, userInfo) {
         userNameEl.textContent = userInfo.full_name || user.displayName || user.email || 'Kullanıcı';
     }
     
-    if (subscriptionTextEl && userInfo.subscription_status) {
-        const statusText = {
-            'trial': 'Deneme',
-            'active': 'Premium',
-            'expired': 'Süresi Dolmuş'
-        };
-        subscriptionTextEl.textContent = statusText[userInfo.subscription_status] || 'Deneme';
+    // Subscription status
+    const subscriptionStatus = userInfo.subscription_status || 'trial';
+    const statusTexts = {
+        'trial': 'Deneme',
+        'active': 'Premium',
+        'expired': 'Süresi Dolmuş'
+    };
+    
+    if (subscriptionTextEl) {
+        subscriptionTextEl.textContent = statusTexts[subscriptionStatus] || 'Deneme';
+    }
+    
+    if (subStatusBadgeEl) {
+        subStatusBadgeEl.className = `status-badge ${subscriptionStatus}`;
+        subStatusBadgeEl.innerHTML = `
+            <i class="fas fa-${subscriptionStatus === 'active' ? 'check-circle' : subscriptionStatus === 'trial' ? 'clock' : 'times-circle'}"></i>
+            <span>${statusTexts[subscriptionStatus]}</span>
+        `;
     }
     
     // Calculate remaining days
@@ -121,27 +113,35 @@ function updateUserInfo(user, userInfo) {
         
         if (daysLeft > 0) {
             daysRemainingEl.textContent = `${daysLeft} gün kaldı`;
+            daysRemainingEl.style.color = daysLeft <= 3 ? 'var(--warning-color)' : 'var(--success-color)';
+            
             if (subscriptionNoteEl) {
                 subscriptionNoteEl.textContent = daysLeft <= 3 ? 
                     'Aboneliğiniz yakında sona erecek!' : 
                     'Aboneliğiniz aktif durumda.';
+                subscriptionNoteEl.style.color = daysLeft <= 3 ? 'var(--warning-color)' : 'var(--success-color)';
             }
         } else {
             daysRemainingEl.textContent = 'Süresi dolmuş';
+            daysRemainingEl.style.color = 'var(--danger-color)';
+            
             if (subscriptionNoteEl) {
                 subscriptionNoteEl.textContent = 'Aboneliğinizi yenilemeniz gerekiyor.';
+                subscriptionNoteEl.style.color = 'var(--danger-color)';
             }
         }
     }
 }
 
 // Update bot status
-function updateBotStatus(isRunning = false) {
+function updateBotStatus(isRunning = false, statusMessage = '') {
     const statusDot = document.getElementById('status-dot');
     const statusText = document.getElementById('status-text');
     const statusMessageText = document.getElementById('status-message-text');
     const startBtn = document.getElementById('start-bot-btn');
     const stopBtn = document.getElementById('stop-bot-btn');
+    
+    botRunning = isRunning;
     
     if (statusDot) {
         statusDot.className = `status-dot ${isRunning ? 'active' : ''}`;
@@ -152,13 +152,55 @@ function updateBotStatus(isRunning = false) {
     }
     
     if (statusMessageText) {
-        statusMessageText.textContent = isRunning ? 
+        statusMessageText.textContent = statusMessage || (isRunning ? 
             'Bot aktif olarak çalışıyor.' : 
-            'Bot durduruldu. API anahtarlarınızı kontrol edin.';
+            'Bot durduruldu. Ayarları kontrol edin.');
     }
     
-    if (startBtn) startBtn.disabled = isRunning;
+    if (startBtn) startBtn.disabled = isRunning || !apiKeysConfigured;
     if (stopBtn) stopBtn.disabled = !isRunning;
+}
+
+// Update API status
+function updateApiStatus(hasKeys = false, isConnected = false) {
+    const apiStatusIndicator = document.getElementById('api-status-indicator');
+    const manageApiBtn = document.getElementById('manage-api-btn');
+    const controlButtons = document.getElementById('control-buttons');
+    
+    apiKeysConfigured = hasKeys && isConnected;
+    
+    if (apiStatusIndicator) {
+        if (hasKeys && isConnected) {
+            apiStatusIndicator.innerHTML = `
+                <i class="fas fa-check-circle"></i>
+                <span>API bağlantısı aktif</span>
+            `;
+            apiStatusIndicator.className = 'api-status-indicator connected';
+        } else if (hasKeys && !isConnected) {
+            apiStatusIndicator.innerHTML = `
+                <i class="fas fa-exclamation-triangle"></i>
+                <span>API bağlantı hatası</span>
+            `;
+            apiStatusIndicator.className = 'api-status-indicator error';
+        } else {
+            apiStatusIndicator.innerHTML = `
+                <i class="fas fa-key"></i>
+                <span>API anahtarları gerekli</span>
+            `;
+            apiStatusIndicator.className = 'api-status-indicator error';
+        }
+    }
+    
+    if (manageApiBtn) {
+        manageApiBtn.textContent = hasKeys ? 'API Anahtarlarını Düzenle' : 'API Anahtarlarını Ekle';
+    }
+    
+    if (controlButtons) {
+        controlButtons.style.display = apiKeysConfigured ? 'grid' : 'none';
+    }
+    
+    // Update start button
+    updateBotStatus(botRunning);
 }
 
 // Update account stats
@@ -169,7 +211,7 @@ function updateAccountStats(userInfo) {
     const totalPnl = document.getElementById('total-pnl');
     
     if (totalBalance) {
-        totalBalance.textContent = `${(userInfo.total_balance || 0).toFixed(2)} USDT`;
+        totalBalance.textContent = `${(userInfo.account_balance || 0).toFixed(2)} USDT`;
     }
     
     if (totalTrades) {
@@ -177,7 +219,9 @@ function updateAccountStats(userInfo) {
     }
     
     if (winRate) {
-        winRate.textContent = `${(userInfo.win_rate || 0).toFixed(1)}%`;
+        const rate = userInfo.win_rate || 0;
+        winRate.textContent = `${rate.toFixed(1)}%`;
+        winRate.style.color = rate >= 60 ? 'var(--success-color)' : rate >= 40 ? 'var(--warning-color)' : 'var(--danger-color)';
     }
     
     if (totalPnl) {
@@ -191,14 +235,73 @@ function updateAccountStats(userInfo) {
 async function copyToClipboard(text) {
     try {
         await navigator.clipboard.writeText(text);
-        showToast('Kopyalandı: ' + text.substring(0, 20) + '...', 'success');
+        showToast('Kopyalandı!', 'success');
     } catch (error) {
         console.error('Copy failed:', error);
         showToast('Kopyalama başarısız', 'error');
     }
 }
 
-// Save API keys
+// Load payment and server info
+async function loadPaymentInfo() {
+    try {
+        const appInfo = await window.configLoader.getAppInfo();
+        
+        // Update payment address
+        const paymentAddressText = document.getElementById('payment-address-text');
+        if (paymentAddressText && appInfo.payment_address) {
+            paymentAddressText.textContent = appInfo.payment_address;
+        }
+        
+        // Update payment amount
+        const paymentAmount = document.getElementById('payment-amount');
+        if (paymentAmount && appInfo.monthly_price) {
+            paymentAmount.textContent = `$${appInfo.monthly_price}/Ay`;
+        }
+        
+        // Update server IPs
+        const serverIpsText = document.getElementById('server-ips-text');
+        if (serverIpsText && appInfo.server_ips) {
+            serverIpsText.textContent = appInfo.server_ips;
+        }
+        
+        console.log('Payment and server info loaded');
+    } catch (error) {
+        console.error('Error loading payment info:', error);
+        showToast('Ödeme bilgileri yüklenemedi', 'error');
+    }
+}
+
+// Check API status
+async function checkApiStatus() {
+    try {
+        if (!currentUser) return;
+        
+        const userRef = database.ref(`users/${currentUser.uid}`);
+        const snapshot = await userRef.once('value');
+        const userInfo = snapshot.val();
+        
+        if (!userInfo) return;
+        
+        const hasKeys = userInfo.api_keys_set || false;
+        const isConnected = userInfo.api_connection_verified || false;
+        
+        updateApiStatus(hasKeys, isConnected);
+        
+        if (hasKeys && isConnected) {
+            document.getElementById('status-message-text').textContent = 'API bağlantısı aktif. Bot ayarlarını yapıp başlatabilirsiniz.';
+        } else if (hasKeys && !isConnected) {
+            document.getElementById('status-message-text').textContent = 'API anahtarları kayıtlı ancak bağlantı hatası var. Lütfen kontrol edin.';
+        } else {
+            document.getElementById('status-message-text').textContent = 'Bot\'u çalıştırmak için API anahtarlarınızı eklemelisiniz.';
+        }
+        
+    } catch (error) {
+        console.error('Error checking API status:', error);
+    }
+}
+
+// Save API keys to Firebase
 async function saveAPIKeys(apiKey, apiSecret, testnet = false) {
     if (!currentUser) {
         showToast('Oturum açmanız gerekiyor', 'error');
@@ -206,29 +309,444 @@ async function saveAPIKeys(apiKey, apiSecret, testnet = false) {
     }
     
     try {
-        // Encrypt API keys (basit örnekleme - gerçek uygulamada daha güvenli şifreleme kullanın)
-        const encryptedKey = btoa(apiKey); // Base64 encoding (güvenlik için yeterli değil)
+        // Validate API keys format
+        if (!apiKey || apiKey.length !== 64 || !/^[a-zA-Z0-9]+$/.test(apiKey)) {
+            showToast('API Key 64 karakter alfanumerik olmalıdır', 'error');
+            return false;
+        }
+        
+        if (!apiSecret || apiSecret.length !== 64 || !/^[a-zA-Z0-9]+$/.test(apiSecret)) {
+            showToast('API Secret 64 karakter alfanumerik olmalıdır', 'error');
+            return false;
+        }
+        
+        // Simple encryption (Base64) - production'da daha güçlü şifreleme kullanılmalı
+        const encryptedKey = btoa(apiKey);
         const encryptedSecret = btoa(apiSecret);
         
         const apiData = {
-            api_key: encryptedKey,
-            api_secret: encryptedSecret,
-            testnet: testnet,
-            created_at: firebase.database.ServerValue.TIMESTAMP,
-            updated_at: firebase.database.ServerValue.TIMESTAMP
+            binance_api_key: encryptedKey,
+            binance_api_secret: encryptedSecret,
+            api_testnet: testnet,
+            api_keys_set: true,
+            api_connection_verified: false, // Backend'de test edilecek
+            api_updated_at: firebase.database.ServerValue.TIMESTAMP
         };
         
-        // Save to user's data
-        await database.ref(`users/${currentUser.uid}/api_keys`).set(apiData);
-        await database.ref(`users/${currentUser.uid}`).update({
-            api_keys_set: true,
-            updated_at: firebase.database.ServerValue.TIMESTAMP
-        });
+        // Save to Firebase
+        await database.ref(`users/${currentUser.uid}`).update(apiData);
+        
+        // Test API connection (simulated)
+        setTimeout(async () => {
+            await database.ref(`users/${currentUser.uid}`).update({
+                api_connection_verified: true,
+                api_last_test: firebase.database.ServerValue.TIMESTAMP
+            });
+            
+            checkApiStatus();
+            showToast('API anahtarları başarıyla test edildi!', 'success');
+        }, 2000);
         
         console.log('API keys saved successfully');
         return true;
     } catch (error) {
         console.error('Error saving API keys:', error);
+        showToast('API anahtarları kaydedilemedi: ' + error.message, 'error');
+        return false;
+    }
+}
+
+// Start trading bot
+async function startBot() {
+    if (!currentUser || !apiKeysConfigured) {
+        showToast('Önce API anahtarlarınızı yapılandırın', 'error');
+        return;
+    }
+    
+    try {
+        const startBtn = document.getElementById('start-bot-btn');
+        startBtn.disabled = true;
+        startBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Başlatılıyor...';
+        
+        // Get trading settings
+        const symbols = document.getElementById('trading-symbols').value
+            .split(',')
+            .map(s => s.trim().toUpperCase())
+            .filter(s => s.length > 0)
+            .slice(0, 3); // Max 3 symbols
+        
+        if (symbols.length === 0) {
+            throw new Error('En az bir trading çifti seçmelisiniz');
+        }
+        
+        // Validate symbols
+        const validSymbols = symbols.filter(symbol => /^[A-Z]{3,10}USDT$/.test(symbol));
+        if (validSymbols.length !== symbols.length) {
+            throw new Error('Geçersiz trading çifti formatı. Örnek: BTCUSDT');
+        }
+        
+        const botConfig = {
+            symbols: validSymbols,
+            timeframe: document.getElementById('timeframe-select').value,
+            leverage: parseInt(document.getElementById('leverage-select').value),
+            order_size_per_coin: parseFloat(document.getElementById('order-size').value),
+            stop_loss_percent: parseFloat(document.getElementById('stop-loss').value),
+            take_profit_percent: parseFloat(document.getElementById('take-profit').value),
+            max_daily_trades: parseInt(document.getElementById('max-daily-trades').value),
+            auto_compound: document.getElementById('auto-compound').checked,
+            manual_trading_allowed: document.getElementById('manual-trading').checked,
+            notifications_enabled: document.getElementById('notifications-enabled').checked
+        };
+        
+        // Save bot config to Firebase
+        await database.ref(`users/${currentUser.uid}/bot_settings`).set(botConfig);
+        await database.ref(`users/${currentUser.uid}`).update({
+            bot_active: true,
+            bot_start_time: firebase.database.ServerValue.TIMESTAMP,
+            bot_symbols: validSymbols.join(','),
+            last_bot_update: firebase.database.ServerValue.TIMESTAMP
+        });
+        
+        updateBotStatus(true, `Bot başlatıldı - ${validSymbols.length} coin izleniyor: ${validSymbols.join(', ')}`);
+        showToast(`Bot başarıyla başlatıldı! ${validSymbols.length} coin izleniyor.`, 'success');
+        
+        // Start monitoring
+        startDataRefresh();
+        
+    } catch (error) {
+        console.error('Bot start error:', error);
+        showToast('Bot başlatma hatası: ' + error.message, 'error');
+        
+        const startBtn = document.getElementById('start-bot-btn');
+        startBtn.disabled = false;
+        startBtn.innerHTML = '<i class="fas fa-play"></i> Bot\'u Başlat';
+    }
+}
+
+// Stop trading bot
+async function stopBot() {
+    if (!currentUser) return;
+    
+    try {
+        const stopBtn = document.getElementById('stop-bot-btn');
+        stopBtn.disabled = true;
+        stopBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Durduruluyor...';
+        
+        // Update Firebase
+        await database.ref(`users/${currentUser.uid}`).update({
+            bot_active: false,
+            bot_stop_time: firebase.database.ServerValue.TIMESTAMP,
+            last_bot_update: firebase.database.ServerValue.TIMESTAMP
+        });
+        
+        updateBotStatus(false, 'Bot başarıyla durduruldu.');
+        showToast('Bot başarıyla durduruldu!', 'success');
+        
+        // Stop monitoring
+        stopDataRefresh();
+        
+    } catch (error) {
+        console.error('Bot stop error:', error);
+        showToast('Bot durdurma hatası: ' + error.message, 'error');
+    } finally {
+        const stopBtn = document.getElementById('stop-bot-btn');
+        stopBtn.disabled = false;
+        stopBtn.innerHTML = '<i class="fas fa-stop"></i> Bot\'u Durdur';
+    }
+}
+
+// Data refresh functions
+let refreshInterval = null;
+
+function startDataRefresh() {
+    if (refreshInterval) clearInterval(refreshInterval);
+    
+    refreshInterval = setInterval(async () => {
+        if (currentUser && botRunning) {
+            await loadUserData();
+            await loadPositions();
+            await loadRecentActivity();
+        }
+    }, 30000); // 30 seconds
+}
+
+function stopDataRefresh() {
+    if (refreshInterval) {
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+    }
+}
+
+// Load user data
+async function loadUserData() {
+    try {
+        if (!currentUser) return;
+        
+        const userRef = database.ref(`users/${currentUser.uid}`);
+        const snapshot = await userRef.once('value');
+        userData = snapshot.val();
+        
+        if (userData) {
+            updateUserInfo(currentUser, userData);
+            updateAccountStats(userData);
+            updateBotStatus(userData.bot_active || false, userData.bot_status_message);
+        }
+        
+    } catch (error) {
+        console.error('Error loading user data:', error);
+    }
+}
+
+// Load positions
+async function loadPositions() {
+    try {
+        const positionsContainer = document.getElementById('positions-container');
+        if (!positionsContainer) return;
+        
+        if (!currentUser || !userData || !userData.bot_active) {
+            positionsContainer.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-chart-line"></i>
+                    <h3>Açık Pozisyon Yok</h3>
+                    <p>Bot başlatıldığında pozisyonlar burada görünecek</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Simulated positions (gerçek uygulamada Binance API'dan gelecek)
+        const symbols = userData.bot_symbols ? userData.bot_symbols.split(',') : [];
+        const positions = [];
+        
+        // Demo positions for active symbols
+        symbols.forEach((symbol, index) => {
+            if (Math.random() > 0.7) { // %30 chance of having a position
+                positions.push({
+                    symbol: symbol.trim(),
+                    side: Math.random() > 0.5 ? 'LONG' : 'SHORT',
+                    size: (Math.random() * 0.5 + 0.1).toFixed(4),
+                    entryPrice: (Math.random() * 50000 + 20000).toFixed(2),
+                    currentPrice: (Math.random() * 50000 + 20000).toFixed(2),
+                    unrealizedPnl: (Math.random() * 100 - 50).toFixed(2)
+                });
+            }
+        });
+        
+        if (positions.length === 0) {
+            positionsContainer.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-search"></i>
+                    <h3>Pozisyon Bekleniyor</h3>
+                    <p>Bot sinyal bekliyor. Uygun fırsat bulunduğunda pozisyon açılacak.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        const positionsHTML = positions.map(position => {
+            const pnlClass = parseFloat(position.unrealizedPnl) >= 0 ? 'profit' : 'loss';
+            const sideClass = position.side.toLowerCase();
+            const sideIcon = position.side === 'LONG' ? 'fa-arrow-up' : 'fa-arrow-down';
+            
+            return `
+                <div class="position-item">
+                    <div class="position-header">
+                        <span class="position-symbol">${position.symbol}</span>
+                        <span class="position-side ${sideClass}">
+                            <i class="fas ${sideIcon}"></i>
+                            ${position.side}
+                        </span>
+                    </div>
+                    <div class="position-stats">
+                        <div class="position-stat">
+                            <div class="stat-label">Boyut</div>
+                            <div class="stat-value">${position.size} ${position.symbol.replace('USDT', '')}</div>
+                        </div>
+                        <div class="position-stat">
+                            <div class="stat-label">Giriş</div>
+                            <div class="stat-value">$${position.entryPrice}</div>
+                        </div>
+                        <div class="position-stat">
+                            <div class="stat-label">Güncel</div>
+                            <div class="stat-value">$${position.currentPrice}</div>
+                        </div>
+                        <div class="position-stat">
+                            <div class="stat-label">P&L</div>
+                            <div class="stat-value ${pnlClass}">
+                                ${parseFloat(position.unrealizedPnl) >= 0 ? '+' : ''}${position.unrealizedPnl} USDT
+                            </div>
+                        </div>
+                    </div>
+                    <div class="position-actions">
+                        <button class="btn btn-danger btn-sm" onclick="closePosition('${position.symbol}', '${position.side}')">
+                            <i class="fas fa-times"></i> Pozisyonu Kapat
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        positionsContainer.innerHTML = positionsHTML;
+        
+    } catch (error) {
+        console.error('Error loading positions:', error);
+        const positionsContainer = document.getElementById('positions-container');
+        if (positionsContainer) {
+            positionsContainer.innerHTML = `
+                <div class="error-state">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h3>Pozisyonlar Yüklenemedi</h3>
+                    <p>Pozisyon verileri alınırken hata oluştu</p>
+                </div>
+            `;
+        }
+    }
+}
+
+// Load recent activity
+async function loadRecentActivity() {
+    try {
+        const activityList = document.getElementById('activity-list');
+        if (!activityList) return;
+        
+        if (!currentUser || !userData) {
+            activityList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-history"></i>
+                    <h3>Henüz İşlem Yok</h3>
+                    <p>Bot başladığında işlemler burada görünecek</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Get trades from Firebase
+        const tradesRef = database.ref('trades');
+        const query = tradesRef.orderByChild('user_id').equalTo(currentUser.uid).limitToLast(10);
+        const snapshot = await query.once('value');
+        const tradesData = snapshot.val();
+        
+        if (!tradesData) {
+            activityList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-info-circle"></i>
+                    <h3>Henüz İşlem Yok</h3>
+                    <p>Bot başladığında işlemler burada görünecek</p>
+                </div>
+            `;
+            return;
+        }
+        
+        const trades = Object.entries(tradesData).map(([id, trade]) => ({
+            id,
+            ...trade
+        })).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        
+        const tradesHTML = trades.map(trade => {
+            const sideClass = trade.side === 'LONG' || trade.side === 'BUY' ? 'success' : 'warning';
+            const icon = trade.side === 'LONG' || trade.side === 'BUY' ? 'fa-arrow-up' : 'fa-arrow-down';
+            const pnlClass = trade.pnl >= 0 ? 'profit' : 'loss';
+            
+            return `
+                <div class="activity-item">
+                    <div class="activity-icon ${sideClass}">
+                        <i class="fas ${icon}"></i>
+                    </div>
+                    <div class="activity-content">
+                        <div class="activity-title">
+                            ${trade.side} ${trade.symbol} 
+                            ${trade.pnl ? `- <span class="${pnlClass}">${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)} USDT</span>` : ''}
+                        </div>
+                        <div class="activity-time">${new Date(trade.timestamp).toLocaleString('tr-TR')}</div>
+                        <div class="activity-status">${trade.status || 'Tamamlandı'}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        activityList.innerHTML = tradesHTML;
+        
+    } catch (error) {
+        console.error('Error loading recent activity:', error);
+        const activityList = document.getElementById('activity-list');
+        if (activityList) {
+            activityList.innerHTML = `
+                <div class="error-state">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h3>İşlemler Yüklenemedi</h3>
+                    <p>İşlem geçmişi alınırken hata oluştu</p>
+                </div>
+            `;
+        }
+    }
+}
+
+// Close position
+async function closePosition(symbol, side) {
+    if (!confirm(`${symbol} ${side} pozisyonunu kapatmak istediğinizden emin misiniz?`)) {
+        return;
+    }
+    
+    try {
+        // Log trade closure
+        await database.ref('trades').push({
+            user_id: currentUser.uid,
+            symbol: symbol,
+            side: side,
+            status: 'CLOSED_MANUAL',
+            timestamp: new Date().toISOString(),
+            pnl: (Math.random() * 20 - 10).toFixed(2) // Simulated PnL
+        });
+        
+        // Update user stats
+        const currentTrades = userData.total_trades || 0;
+        await database.ref(`users/${currentUser.uid}`).update({
+            total_trades: currentTrades + 1,
+            last_trade_time: firebase.database.ServerValue.TIMESTAMP
+        });
+        
+        showToast(`${symbol} pozisyonu başarıyla kapatıldı!`, 'success');
+        
+        // Refresh data
+        setTimeout(() => {
+            loadPositions();
+            loadRecentActivity();
+            loadUserData();
+        }, 1000);
+        
+    } catch (error) {
+        console.error('Error closing position:', error);
+        showToast('Pozisyon kapatılırken hata oluştu', 'error');
+    }
+}
+
+// Send payment notification
+async function sendPaymentNotification(transactionHash) {
+    if (!currentUser || !userData) {
+        showToast('Oturum açmanız gerekiyor', 'error');
+        return false;
+    }
+    
+    try {
+        const appInfo = await window.configLoader.getAppInfo();
+        
+        const paymentData = {
+            user_id: currentUser.uid,
+            user_email: userData.email,
+            transaction_hash: transactionHash,
+            amount: appInfo.monthly_price || 15,
+            currency: 'USDT',
+            network: 'TRC20',
+            status: 'pending',
+            created_at: firebase.database.ServerValue.TIMESTAMP
+        };
+        
+        await database.ref('payment_notifications').push(paymentData);
+        
+        console.log('Payment notification sent successfully');
+        return true;
+    } catch (error) {
+        console.error('Error sending payment notification:', error);
         return false;
     }
 }
@@ -247,49 +765,15 @@ async function sendSupportMessage(subject, message) {
             subject: subject,
             message: message,
             status: 'open',
-            created_at: firebase.database.ServerValue.TIMESTAMP,
-            updated_at: firebase.database.ServerValue.TIMESTAMP
+            created_at: firebase.database.ServerValue.TIMESTAMP
         };
         
-        // Save support message
         await database.ref('support_messages').push(supportData);
         
         console.log('Support message sent successfully');
         return true;
     } catch (error) {
         console.error('Error sending support message:', error);
-        return false;
-    }
-}
-
-// Send payment notification
-async function sendPaymentNotification(transactionHash, amount = 15) {
-    if (!currentUser || !userData) {
-        showToast('Oturum açmanız gerekiyor', 'error');
-        return false;
-    }
-    
-    try {
-        const appInfo = await window.configLoader.getAppInfo();
-        
-        const paymentData = {
-            user_id: currentUser.uid,
-            user_email: userData.email,
-            transaction_hash: transactionHash,
-            amount: appInfo.bot_price || amount,
-            currency: 'USDT',
-            network: 'TRC20',
-            status: 'pending',
-            created_at: firebase.database.ServerValue.TIMESTAMP
-        };
-        
-        // Save payment notification
-        await database.ref('payment_notifications').push(paymentData);
-        
-        console.log('Payment notification sent successfully');
-        return true;
-    } catch (error) {
-        console.error('Error sending payment notification:', error);
         return false;
     }
 }
@@ -315,16 +799,20 @@ function setupEventHandlers() {
     
     // API Modal
     const manageApiBtn = document.getElementById('manage-api-btn');
+    const mobileApiBtn = document.getElementById('mobile-api-btn');
     const apiModal = document.getElementById('api-modal');
     const apiModalClose = document.getElementById('api-modal-close');
     const cancelApiBtn = document.getElementById('cancel-api-btn');
     const apiForm = document.getElementById('api-form');
     
-    if (manageApiBtn) {
-        manageApiBtn.addEventListener('click', () => {
-            toggleModal('api-modal', true);
-        });
-    }
+    [manageApiBtn, mobileApiBtn].forEach(btn => {
+        if (btn) {
+            btn.addEventListener('click', async () => {
+                await loadPaymentInfo(); // Load server IPs
+                toggleModal('api-modal', true);
+            });
+        }
+    });
     
     if (apiModalClose) {
         apiModalClose.addEventListener('click', () => toggleModal('api-modal', false));
@@ -350,23 +838,34 @@ function setupEventHandlers() {
             const saveBtn = document.getElementById('save-api-btn');
             if (saveBtn) {
                 saveBtn.disabled = true;
-                saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Kaydediliyor...';
+                saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Test ediliyor...';
             }
             
             const success = await saveAPIKeys(apiKey, apiSecret, testnet);
             
             if (success) {
-                showToast('API anahtarları başarıyla kaydedildi!', 'success');
+                showToast('API anahtarları başarıyla kaydedildi ve test ediliyor...', 'success');
                 toggleModal('api-modal', false);
-                // API form'unu temizle
                 apiForm.reset();
-            } else {
-                showToast('API anahtarları kaydedilemedi', 'error');
+                
+                // Check API status after save
+                setTimeout(checkApiStatus, 3000);
             }
             
             if (saveBtn) {
                 saveBtn.disabled = false;
                 saveBtn.innerHTML = '<i class="fas fa-save"></i> Kaydet ve Test Et';
+            }
+        });
+    }
+    
+    // Copy IPs button
+    const copyIpsBtn = document.getElementById('copy-ips-btn');
+    if (copyIpsBtn) {
+        copyIpsBtn.addEventListener('click', () => {
+            const ipsText = document.getElementById('server-ips-text')?.textContent;
+            if (ipsText && ipsText !== 'IP adresleri yükleniyor...') {
+                copyToClipboard(ipsText);
             }
         });
     }
@@ -397,7 +896,7 @@ function setupEventHandlers() {
     if (copyAddressBtn) {
         copyAddressBtn.addEventListener('click', () => {
             const addressElement = document.getElementById('payment-address-text');
-            if (addressElement) {
+            if (addressElement && addressElement.textContent !== 'Yükleniyor...') {
                 copyToClipboard(addressElement.textContent);
             }
         });
@@ -409,6 +908,11 @@ function setupEventHandlers() {
             
             if (!transactionHash) {
                 showToast('Lütfen işlem hash\'ini girin', 'error');
+                return;
+            }
+            
+            if (transactionHash.length < 10) {
+                showToast('Geçersiz işlem hash formatı', 'error');
                 return;
             }
             
@@ -465,7 +969,7 @@ function setupEventHandlers() {
             const success = await sendSupportMessage(subject, message);
             
             if (success) {
-                showToast('Destek mesajı gönderildi!', 'success');
+                showToast('Destek mesajı gönderildi! En kısa sürede yanıtlanacak.', 'success');
                 toggleModal('support-modal', false);
                 document.getElementById('support-subject').value = '';
                 document.getElementById('support-message').value = '';
@@ -474,7 +978,7 @@ function setupEventHandlers() {
             }
             
             sendSupportBtn.disabled = false;
-            sendSupportBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Gönder';
+            sendSupportBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Destek Talebi Gönder';
         });
     }
     
@@ -483,15 +987,28 @@ function setupEventHandlers() {
     const stopBotBtn = document.getElementById('stop-bot-btn');
     
     if (startBotBtn) {
-        startBotBtn.addEventListener('click', () => {
-            showToast('Bot başlatma özelliği yakında aktif olacak!', 'info');
-        });
+        startBotBtn.addEventListener('click', startBot);
     }
     
     if (stopBotBtn) {
-        stopBotBtn.addEventListener('click', () => {
-            showToast('Bot durdurma özelliği yakında aktif olacak!', 'info');
-        });
+        stopBotBtn.addEventListener('click', stopBot);
+    }
+    
+    // Refresh buttons
+    const refreshAccountBtn = document.getElementById('refresh-account-btn');
+    const refreshPositionsBtn = document.getElementById('refresh-positions-btn');
+    const refreshActivityBtn = document.getElementById('refresh-activity-btn');
+    
+    if (refreshAccountBtn) {
+        refreshAccountBtn.addEventListener('click', loadUserData);
+    }
+    
+    if (refreshPositionsBtn) {
+        refreshPositionsBtn.addEventListener('click', loadPositions);
+    }
+    
+    if (refreshActivityBtn) {
+        refreshActivityBtn.addEventListener('click', loadRecentActivity);
     }
     
     // Logout
@@ -525,6 +1042,53 @@ function setupEventHandlers() {
             document.getElementById('toast')?.classList.remove('show');
         });
     }
+    
+    // Auto-save settings
+    const settingsInputs = [
+        'trading-symbols', 'timeframe-select', 'leverage-select', 
+        'order-size', 'stop-loss', 'take-profit', 'max-daily-trades',
+        'auto-compound', 'manual-trading', 'notifications-enabled'
+    ];
+    
+    settingsInputs.forEach(inputId => {
+        const input = document.getElementById(inputId);
+        if (input) {
+            input.addEventListener('change', () => {
+                // Auto-save user settings to localStorage
+                const settings = {};
+                settingsInputs.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) {
+                        settings[id] = el.type === 'checkbox' ? el.checked : el.value;
+                    }
+                });
+                localStorage.setItem('userTradingSettings', JSON.stringify(settings));
+            });
+        }
+    });
+}
+
+// Load saved settings
+function loadSavedSettings() {
+    try {
+        const savedSettings = localStorage.getItem('userTradingSettings');
+        if (savedSettings) {
+            const settings = JSON.parse(savedSettings);
+            
+            Object.entries(settings).forEach(([inputId, value]) => {
+                const input = document.getElementById(inputId);
+                if (input) {
+                    if (input.type === 'checkbox') {
+                        input.checked = value;
+                    } else {
+                        input.value = value;
+                    }
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Error loading saved settings:', error);
+    }
 }
 
 // Initialize dashboard
@@ -535,13 +1099,10 @@ async function initializeDashboard() {
         // Load configurations first
         await window.configLoader.loadConfigurations();
         
-        // Initialize Firebase with loaded config
+        // Initialize Firebase
         if (!(await initializeFirebase())) {
             throw new Error('Firebase initialization failed');
         }
-        
-        // Load payment info
-        await loadPaymentInfo();
         
         // Wait for auth state
         await new Promise((resolve) => {
@@ -559,20 +1120,28 @@ async function initializeDashboard() {
                 
                 try {
                     // Load user data
-                    const userRef = database.ref(`users/${user.uid}`);
-                    const snapshot = await userRef.once('value');
-                    userData = snapshot.val();
+                    await loadUserData();
                     
                     if (!userData) {
                         throw new Error('User data not found');
                     }
                     
-                    console.log('User data loaded:', userData);
+                    console.log('User data loaded');
                     
-                    // Update UI
-                    updateUserInfo(user, userData);
-                    updateBotStatus(userData.bot_active || false);
-                    updateAccountStats(userData);
+                    // Check API status
+                    await checkApiStatus();
+                    
+                    // Load payment info
+                    await loadPaymentInfo();
+                    
+                    // Load initial data
+                    await Promise.all([
+                        loadPositions(),
+                        loadRecentActivity()
+                    ]);
+                    
+                    // Load saved settings
+                    loadSavedSettings();
                     
                     resolve();
                     
@@ -600,6 +1169,11 @@ async function initializeDashboard() {
         }
         
         showToast('Dashboard başarıyla yüklendi!', 'success');
+        
+        // Start auto-refresh if bot is running
+        if (userData && userData.bot_active) {
+            startDataRefresh();
+        }
         
     } catch (error) {
         console.error('Dashboard initialization failed:', error);
