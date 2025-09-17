@@ -57,7 +57,7 @@ class BinanceClient:
                 if self.client:
                     await self.client.close_connection()
                     self.client = None
-                raise e
+                raise Exception(f"Binance bağlantı hatası: {str(e)}")
         
         return self.client
         
