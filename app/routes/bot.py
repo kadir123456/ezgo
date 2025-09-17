@@ -2,13 +2,13 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer
 from app.bot_manager import bot_manager, StartRequest
 from app.firebase_manager import firebase_manager
-from app.utils.logger import get_logger
 from app.utils.crypto import encrypt_data, decrypt_data
 from pydantic import BaseModel
 import firebase_admin
 from firebase_admin import auth as firebase_auth
+import logging
 
-logger = get_logger("bot_routes")
+logger = logging.getLogger("bot_routes")
 router = APIRouter(prefix="/api/bot", tags=["bot"])
 security = HTTPBearer()
 
