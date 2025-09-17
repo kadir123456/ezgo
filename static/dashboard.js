@@ -257,6 +257,13 @@ function updateAccountStats(userInfo) {
         totalPnl.textContent = `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} USDT`;
         totalPnl.style.color = pnl >= 0 ? 'var(--success-color)' : 'var(--danger-color)';
     }
+    
+    // Real-time balance update
+    if (userInfo.totalBalance !== undefined) {
+        if (totalBalance) {
+            totalBalance.textContent = `${(userInfo.totalBalance || 0).toFixed(2)} USDT`;
+        }
+    }
 }
 
 // Copy to clipboard
@@ -319,15 +326,52 @@ async function checkApiStatus() {
         updateApiStatus(hasKeys, isConnected);
         
         if (hasKeys && isConnected) {
-            document.getElementById('status-message-text').textContent = 'API bağlantısı aktif. Bot ayarlarını yapıp başlatabilirsiniz.';
+            const statusEl = document.getElementById('status-message-text');
+            if (statusEl) {
+                statusEl.textContent = 'API bağlantısı aktif. Bot ayarlarını yapıp başlatabilirsiniz.';
+            }
+            
+            // Load real trading pairs
+            await loadTradingPairs();
         } else if (hasKeys && !isConnected) {
-            document.getElementById('status-message-text').textContent = 'API anahtarları kayıtlı ancak bağlantı hatası var. Lütfen kontrol edin.';
+            const statusEl = document.getElementById('status-message-text');
+            if (statusEl) {
+                statusEl.textContent = 'API anahtarları kayıtlı ancak bağlantı hatası var. Lütfen kontrol edin.';
+            }
         } else {
-            document.getElementById('status-message-text').textContent = 'Bot\'u çalıştırmak için API anahtarlarınızı eklemelisiniz.';
+            const statusEl = document.getElementById('status-message-text');
+            if (statusEl) {
+                statusEl.textContent = 'Bot\'u çalıştırmak için API anahtarlarınızı eklemelisiniz.';
+            }
         }
         
     } catch (error) {
         console.error('Error checking API status:', error);
+    }
+}
+
+// Load real trading pairs from backend
+async function loadTradingPairs() {
+    try {
+        const response = await fetch('/api/user/trading-pairs', {
+            headers: {
+                'Authorization': `Bearer ${await currentUser.getIdToken()}`
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            const symbolSelect = document.getElementById('trading-symbols');
+            
+            if (symbolSelect && data.pairs) {
+                // Update placeholder with real symbols
+                const symbols = data.pairs.map(p => p.symbol).slice(0, 3).join(', ');
+                symbolSelect.placeholder = symbols;
+                symbolSelect.value = symbols;
+            }
+        }
+    } catch (error) {
+        console.error('Error loading trading pairs:', error);
     }
 }
 
@@ -361,55 +405,48 @@ async function saveAPIKeys(apiKey, apiSecret, testnet = false) {
             `;
         }
         
-        // Simple encryption (Base64) - production'da daha güçlü şifreleme kullanılmalı
-        const encryptedKey = btoa(apiKey);
-        const encryptedSecret = btoa(apiSecret);
+        // Backend'e gönder (gerçek test)
+        const response = await fetch('/api/bot/api-keys', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${await currentUser.getIdToken()}`
+            },
+            body: JSON.stringify({
+                api_key: apiKey,
+                api_secret: apiSecret,
+                testnet: testnet
+            })
+        });
         
-        const apiData = {
-            binance_api_key: encryptedKey,
-            binance_api_secret: encryptedSecret,
-            api_testnet: testnet,
-            api_keys_set: true,
-            api_connection_verified: false, // Backend'de test edilecek
-            api_updated_at: firebase.database.ServerValue.TIMESTAMP
-        };
+        const result = await response.json();
         
-        // Save to Firebase
-        await database.ref(`users/${currentUser.uid}`).update(apiData);
-        
-        // Show success message immediately
-        if (apiTestResult) {
-            apiTestResult.className = 'api-test-result success';
-            apiTestResult.innerHTML = `
-                <i class="fas fa-check-circle"></i>
-                API anahtarları başarıyla kaydedildi ve test ediliyor...
-            `;
-        }
-        
-        // Test API connection (simulated)
-        setTimeout(async () => {
-            await database.ref(`users/${currentUser.uid}`).update({
-                api_connection_verified: true,
-                api_last_test: firebase.database.ServerValue.TIMESTAMP
-            });
-            
-            checkApiStatus();
-            showToast('API anahtarları başarıyla test edildi ve bağlantı doğrulandı!', 'success');
-            
+        if (response.ok && result.success) {
             if (apiTestResult) {
                 apiTestResult.className = 'api-test-result success';
                 apiTestResult.innerHTML = `
                     <i class="fas fa-check-circle"></i>
-                    API anahtarları başarıyla test edildi! Bot'u başlatabilirsiniz.
+                    ${result.message} - Bakiye: ${result.balance || 0} USDT
                 `;
             }
-        }, 2000);
+            
+            showToast('API anahtarları başarıyla kaydedildi ve test edildi!', 'success');
+            
+            // API status'u güncelle
+            setTimeout(() => {
+                checkApiStatus();
+            }, 1000);
+            
+        } else {
+            throw new Error(result.message || 'API test başarısız');
+        }
         
         console.log('API keys saved successfully');
         return true;
     } catch (error) {
         console.error('Error saving API keys:', error);
-        showToast('API anahtarları kaydedilemedi: ' + error.message, 'error');
+        const errorMessage = error.message || 'API anahtarları kaydedilemedi';
+        showToast(errorMessage, 'error');
         
         const apiTestResult = document.getElementById('api-test-result');
         if (apiTestResult) {
@@ -417,7 +454,7 @@ async function saveAPIKeys(apiKey, apiSecret, testnet = false) {
             apiTestResult.className = 'api-test-result error';
             apiTestResult.innerHTML = `
                 <i class="fas fa-times-circle"></i>
-                Hata: ${error.message}
+                Hata: ${errorMessage}
             `;
         }
         return false;
@@ -481,35 +518,38 @@ async function startBot() {
             throw new Error('Take Profit, Stop Loss\'tan büyük olmalıdır');
         }
         
+        // Backend'e bot start isteği gönder
         const botConfig = {
-            symbols: validSymbols,
+            symbol: validSymbols[0], // İlk symbol ile başla
             timeframe: document.getElementById('timeframe-select').value,
             leverage: parseInt(document.getElementById('leverage-select').value),
-            order_size_per_coin: orderSize,
+            order_size: orderSize,
             stop_loss_percent: stopLoss,
             take_profit_percent: takeProfit,
-            max_daily_trades: parseInt(document.getElementById('max-daily-trades').value),
-            auto_compound: document.getElementById('auto-compound').checked,
-            manual_trading_allowed: document.getElementById('manual-trading').checked,
-            notifications_enabled: document.getElementById('notifications-enabled').checked
+            margin_type: 'isolated'
         };
         
-        // Save bot config to Firebase
-        await database.ref(`users/${currentUser.uid}/bot_settings`).set(botConfig);
-        await database.ref(`users/${currentUser.uid}`).update({
-            bot_active: true,
-            bot_start_time: firebase.database.ServerValue.TIMESTAMP,
-            bot_symbols: validSymbols.join(','),
-            bot_status: 'running',
-            bot_last_signal: 'HOLD',
-            last_bot_update: firebase.database.ServerValue.TIMESTAMP
+        const response = await fetch('/api/bot/start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${await currentUser.getIdToken()}`
+            },
+            body: JSON.stringify(botConfig)
         });
         
-        updateBotStatus(true, `Bot başlatıldı - ${validSymbols.length} coin izleniyor: ${validSymbols.join(', ')}`);
-        showToast(`Bot başarıyla başlatıldı! ${validSymbols.length} coin izleniyor.`, 'success');
+        const result = await response.json();
         
-        // Start monitoring
-        startDataRefresh();
+        if (response.ok && result.success) {
+            updateBotStatus(true, result.message || 'Bot başarıyla başlatıldı');
+            showToast('Bot başarıyla başlatıldı!', 'success');
+            
+            // Start monitoring
+            startDataRefresh();
+        } else {
+            throw new Error(result.detail || result.message || 'Bot başlatılamadı');
+        }
+        
         
     } catch (error) {
         console.error('Bot start error:', error);
@@ -520,7 +560,7 @@ async function startBot() {
         if (statusMessageText) {
             statusMessageText.textContent = errorMessage;
         }
-        
+    } finally {
         const startBtn = document.getElementById('start-bot-btn');
         if (startBtn) {
             startBtn.disabled = false;
@@ -544,19 +584,27 @@ async function stopBot() {
             statusMessageText.textContent = 'Bot durduruluyor, lütfen bekleyin...';
         }
         
-        // Update Firebase
-        await database.ref(`users/${currentUser.uid}`).update({
-            bot_active: false,
-            bot_stop_time: firebase.database.ServerValue.TIMESTAMP,
-            bot_status: 'stopped',
-            last_bot_update: firebase.database.ServerValue.TIMESTAMP
+        // Backend'e bot stop isteği gönder
+        const response = await fetch('/api/bot/stop', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${await currentUser.getIdToken()}`
+            }
         });
         
-        updateBotStatus(false, 'Bot başarıyla durduruldu.');
-        showToast('Bot başarıyla durduruldu!', 'success');
+        const result = await response.json();
         
-        // Stop monitoring
-        stopDataRefresh();
+        if (response.ok && result.success) {
+            updateBotStatus(false, result.message || 'Bot başarıyla durduruldu');
+            showToast('Bot başarıyla durduruldu!', 'success');
+            
+            // Stop monitoring
+            stopDataRefresh();
+        } else {
+            throw new Error(result.detail || result.message || 'Bot durdurulamadı');
+        }
+        
         
     } catch (error) {
         console.error('Bot stop error:', error);
@@ -603,18 +651,72 @@ async function loadUserData() {
     try {
         if (!currentUser) return;
         
-        const userRef = database.ref(`users/${currentUser.uid}`);
-        const snapshot = await userRef.once('value');
-        userData = snapshot.val();
-        
-        if (userData) {
-            updateUserInfo(currentUser, userData);
-            updateAccountStats(userData);
-            updateBotStatus(userData.bot_active || false, userData.bot_status_message);
+        // Gerçek kullanıcı verilerini backend'den al
+        try {
+            const response = await fetch('/api/user/profile', {
+                headers: {
+                    'Authorization': `Bearer ${await currentUser.getIdToken()}`
+                }
+            });
+            
+            if (response.ok) {
+                userData = await response.json();
+                updateUserInfo(currentUser, userData);
+                
+                // Gerçek account data al
+                const accountResponse = await fetch('/api/user/account', {
+                    headers: {
+                        'Authorization': `Bearer ${await currentUser.getIdToken()}`
+                    }
+                });
+                
+                if (accountResponse.ok) {
+                    const accountData = await accountResponse.json();
+                    updateAccountStats({
+                        account_balance: accountData.totalBalance,
+                        total_trades: userData.total_trades,
+                        win_rate: userData.win_rate,
+                        total_pnl: userData.total_pnl
+                    });
+                }
+                
+                // Bot status al
+                const botResponse = await fetch('/api/bot/status', {
+                    headers: {
+                        'Authorization': `Bearer ${await currentUser.getIdToken()}`
+                    }
+                });
+                
+                if (botResponse.ok) {
+                    const botStatus = await botResponse.json();
+                    updateBotStatus(
+                        botStatus.status?.is_running || false, 
+                        botStatus.status?.status_message || 'Bot durduruldu'
+                    );
+                }
+                
+            } else {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+        } catch (fetchError) {
+            console.error('Error fetching from backend:', fetchError);
+            
+            // Fallback to Firebase
+            const userRef = database.ref(`users/${currentUser.uid}`);
+            const snapshot = await userRef.once('value');
+            userData = snapshot.val();
+            
+            if (userData) {
+                updateUserInfo(currentUser, userData);
+                updateAccountStats(userData);
+                updateBotStatus(userData.bot_active || false, userData.bot_status_message);
+            }
         }
         
     } catch (error) {
         console.error('Error loading user data:', error);
+        showToast('Kullanıcı verileri yüklenirken hata oluştu', 'error');
     }
 }
 
@@ -624,7 +726,7 @@ async function loadPositions() {
         const positionsContainer = document.getElementById('positions-container');
         if (!positionsContainer) return;
         
-        if (!currentUser || !userData || !userData.bot_active) {
+        if (!currentUser) {
             positionsContainer.innerHTML = `
                 <div class="empty-state">
                     <i class="fas fa-chart-line"></i>
@@ -635,79 +737,88 @@ async function loadPositions() {
             return;
         }
         
-        // Simulated positions (gerçek uygulamada Binance API'dan gelecek)
-        const symbols = userData.bot_symbols ? userData.bot_symbols.split(',') : [];
-        const positions = [];
-        
-        // Demo positions for active symbols
-        symbols.forEach((symbol, index) => {
-            if (Math.random() > 0.7) { // %30 chance of having a position
-                positions.push({
-                    symbol: symbol.trim(),
-                    side: Math.random() > 0.5 ? 'LONG' : 'SHORT',
-                    size: (Math.random() * 0.5 + 0.1).toFixed(4),
-                    entryPrice: (Math.random() * 50000 + 20000).toFixed(2),
-                    currentPrice: (Math.random() * 50000 + 20000).toFixed(2),
-                    unrealizedPnl: (Math.random() * 100 - 50).toFixed(2)
-                });
-            }
-        });
-        
-        if (positions.length === 0) {
-            positionsContainer.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-search"></i>
-                    <h3>Pozisyon Bekleniyor</h3>
-                    <p>Bot sinyal bekliyor. Uygun fırsat bulunduğunda pozisyon açılacak.</p>
-                </div>
-            `;
-            return;
-        }
-        
-        const positionsHTML = positions.map(position => {
-            const pnlClass = parseFloat(position.unrealizedPnl) >= 0 ? 'profit' : 'loss';
-            const sideClass = position.side.toLowerCase();
-            const sideIcon = position.side === 'LONG' ? 'fa-arrow-up' : 'fa-arrow-down';
+        // Gerçek pozisyonları backend'den al
+        try {
+            const response = await fetch('/api/user/positions', {
+                headers: {
+                    'Authorization': `Bearer ${await currentUser.getIdToken()}`
+                }
+            });
             
-            return `
-                <div class="position-item">
-                    <div class="position-header">
-                        <span class="position-symbol">${position.symbol}</span>
-                        <span class="position-side ${sideClass}">
-                            <i class="fas ${sideIcon}"></i>
-                            ${position.side}
-                        </span>
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const positions = await response.json();
+            
+            if (!positions || positions.length === 0) {
+                positionsContainer.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-search"></i>
+                        <h3>Açık Pozisyon Yok</h3>
+                        <p>Bot sinyal bekliyor. Uygun fırsat bulunduğunda pozisyon açılacak.</p>
                     </div>
-                    <div class="position-stats">
-                        <div class="position-stat">
-                            <div class="stat-label">Boyut</div>
-                            <div class="stat-value">${position.size} ${position.symbol.replace('USDT', '')}</div>
+                `;
+                return;
+            }
+            
+            const positionsHTML = positions.map(position => {
+                const pnlValue = parseFloat(position.unrealizedPnl) || 0;
+                const pnlClass = pnlValue >= 0 ? 'profit' : 'loss';
+                const sideClass = position.positionSide.toLowerCase();
+                const sideIcon = position.positionSide === 'LONG' ? 'fa-arrow-up' : 'fa-arrow-down';
+                
+                return `
+                    <div class="position-item">
+                        <div class="position-header">
+                            <span class="position-symbol">${position.symbol}</span>
+                            <span class="position-side ${sideClass}">
+                                <i class="fas ${sideIcon}"></i>
+                                ${position.positionSide}
+                            </span>
                         </div>
-                        <div class="position-stat">
-                            <div class="stat-label">Giriş</div>
-                            <div class="stat-value">$${position.entryPrice}</div>
-                        </div>
-                        <div class="position-stat">
-                            <div class="stat-label">Güncel</div>
-                            <div class="stat-value">$${position.currentPrice}</div>
-                        </div>
-                        <div class="position-stat">
-                            <div class="stat-label">P&L</div>
-                            <div class="stat-value ${pnlClass}">
-                                ${parseFloat(position.unrealizedPnl) >= 0 ? '+' : ''}${position.unrealizedPnl} USDT
+                        <div class="position-stats">
+                            <div class="position-stat">
+                                <div class="stat-label">Boyut</div>
+                                <div class="stat-value">${position.positionAmt} ${position.symbol.replace('USDT', '')}</div>
+                            </div>
+                            <div class="position-stat">
+                                <div class="stat-label">Giriş</div>
+                                <div class="stat-value">$${parseFloat(position.entryPrice).toFixed(2)}</div>
+                            </div>
+                            <div class="position-stat">
+                                <div class="stat-label">Güncel</div>
+                                <div class="stat-value">$${parseFloat(position.markPrice).toFixed(2)}</div>
+                            </div>
+                            <div class="position-stat">
+                                <div class="stat-label">P&L</div>
+                                <div class="stat-value ${pnlClass}">
+                                    ${pnlValue >= 0 ? '+' : ''}${pnlValue.toFixed(2)} USDT
+                                </div>
                             </div>
                         </div>
+                        <div class="position-actions">
+                            <button class="btn btn-danger btn-sm" onclick="closePosition('${position.symbol}', '${position.positionSide}')">
+                                <i class="fas fa-times"></i> Pozisyonu Kapat
+                            </button>
+                        </div>
                     </div>
-                    <div class="position-actions">
-                        <button class="btn btn-danger btn-sm" onclick="closePosition('${position.symbol}', '${position.side}')">
-                            <i class="fas fa-times"></i> Pozisyonu Kapat
-                        </button>
-                    </div>
+                `;
+            }).join('');
+            
+            positionsContainer.innerHTML = positionsHTML;
+            
+        } catch (fetchError) {
+            console.error('Error fetching positions from backend:', fetchError);
+            positionsContainer.innerHTML = `
+                <div class="error-state">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h3>Pozisyonlar Yüklenemedi</h3>
+                    <p>Pozisyon verileri alınırken hata: ${fetchError.message}</p>
+                    <button class="btn btn-primary btn-sm" onclick="loadPositions()">Tekrar Dene</button>
                 </div>
             `;
-        }).join('');
-        
-        positionsContainer.innerHTML = positionsHTML;
+        }
         
     } catch (error) {
         console.error('Error loading positions:', error);
@@ -717,7 +828,8 @@ async function loadPositions() {
                 <div class="error-state">
                     <i class="fas fa-exclamation-triangle"></i>
                     <h3>Pozisyonlar Yüklenemedi</h3>
-                    <p>Pozisyon verileri alınırken hata oluştu</p>
+                    <p>Pozisyon verileri alınırken hata: ${error.message}</p>
+                    <button class="btn btn-primary btn-sm" onclick="loadPositions()">Tekrar Dene</button>
                 </div>
             `;
         }
@@ -730,7 +842,7 @@ async function loadRecentActivity() {
         const activityList = document.getElementById('activity-list');
         if (!activityList) return;
         
-        if (!currentUser || !userData) {
+        if (!currentUser) {
             activityList.innerHTML = `
                 <div class="empty-state">
                     <i class="fas fa-history"></i>
@@ -741,51 +853,67 @@ async function loadRecentActivity() {
             return;
         }
         
-        // Get trades from Firebase
-        const tradesRef = database.ref('trades');
-        const query = tradesRef.orderByChild('user_id').equalTo(currentUser.uid).limitToLast(10);
-        const snapshot = await query.once('value');
-        const tradesData = snapshot.val();
-        
-        if (!tradesData) {
-            activityList.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-info-circle"></i>
-                    <h3>Henüz İşlem Yok</h3>
-                    <p>Bot başladığında işlemler burada görünecek</p>
-                </div>
-            `;
-            return;
-        }
-        
-        const trades = Object.entries(tradesData).map(([id, trade]) => ({
-            id,
-            ...trade
-        })).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        
-        const tradesHTML = trades.map(trade => {
-            const sideClass = trade.side === 'LONG' || trade.side === 'BUY' ? 'success' : 'warning';
-            const icon = trade.side === 'LONG' || trade.side === 'BUY' ? 'fa-arrow-up' : 'fa-arrow-down';
-            const pnlClass = trade.pnl >= 0 ? 'profit' : 'loss';
+        // Gerçek işlemleri backend'den al
+        try {
+            const response = await fetch('/api/user/recent-trades?limit=10', {
+                headers: {
+                    'Authorization': `Bearer ${await currentUser.getIdToken()}`
+                }
+            });
             
-            return `
-                <div class="activity-item">
-                    <div class="activity-icon ${sideClass}">
-                        <i class="fas ${icon}"></i>
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const trades = await response.json();
+            
+            if (!trades || trades.length === 0) {
+                activityList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-info-circle"></i>
+                        <h3>Henüz İşlem Yok</h3>
+                        <p>Bot başladığında işlemler burada görünecek</p>
                     </div>
-                    <div class="activity-content">
-                        <div class="activity-title">
-                            ${trade.side} ${trade.symbol} 
-                            ${trade.pnl ? `- <span class="${pnlClass}">${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)} USDT</span>` : ''}
+                `;
+                return;
+            }
+            
+            const tradesHTML = trades.map(trade => {
+                const sideClass = trade.side === 'LONG' || trade.side === 'BUY' ? 'success' : 'warning';
+                const icon = trade.side === 'LONG' || trade.side === 'BUY' ? 'fa-arrow-up' : 'fa-arrow-down';
+                const pnlValue = parseFloat(trade.pnl) || 0;
+                const pnlClass = pnlValue >= 0 ? 'profit' : 'loss';
+                
+                return `
+                    <div class="activity-item">
+                        <div class="activity-icon ${sideClass}">
+                            <i class="fas ${icon}"></i>
                         </div>
-                        <div class="activity-time">${new Date(trade.timestamp).toLocaleString('tr-TR')}</div>
-                        <div class="activity-status">${trade.status || 'Tamamlandı'}</div>
+                        <div class="activity-content">
+                            <div class="activity-title">
+                                ${trade.side} ${trade.symbol} 
+                                ${trade.pnl ? `- <span class="${pnlClass}">${pnlValue >= 0 ? '+' : ''}${pnlValue.toFixed(2)} USDT</span>` : ''}
+                            </div>
+                            <div class="activity-time">${new Date(trade.time).toLocaleString('tr-TR')}</div>
+                            <div class="activity-status">${trade.status || 'Tamamlandı'}</div>
+                        </div>
                     </div>
+                `;
+            }).join('');
+            
+            activityList.innerHTML = tradesHTML;
+            
+        } catch (fetchError) {
+            console.error('Error fetching trades from backend:', fetchError);
+            activityList.innerHTML = `
+                <div class="error-state">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h3>İşlemler Yüklenemedi</h3>
+                    <p>İşlem geçmişi alınırken hata: ${fetchError.message}</p>
+                    <button class="btn btn-primary btn-sm" onclick="loadRecentActivity()">Tekrar Dene</button>
                 </div>
             `;
-        }).join('');
-        
-        activityList.innerHTML = tradesHTML;
+        }
         
     } catch (error) {
         console.error('Error loading recent activity:', error);
@@ -795,7 +923,8 @@ async function loadRecentActivity() {
                 <div class="error-state">
                     <i class="fas fa-exclamation-triangle"></i>
                     <h3>İşlemler Yüklenemedi</h3>
-                    <p>İşlem geçmişi alınırken hata oluştu</p>
+                    <p>İşlem geçmişi alınırken hata: ${error.message}</p>
+                    <button class="btn btn-primary btn-sm" onclick="loadRecentActivity()">Tekrar Dene</button>
                 </div>
             `;
         }
@@ -809,24 +938,26 @@ async function closePosition(symbol, side) {
     }
     
     try {
-        // Log trade closure
-        await database.ref('trades').push({
-            user_id: currentUser.uid,
-            symbol: symbol,
-            side: side,
-            status: 'CLOSED_MANUAL',
-            timestamp: new Date().toISOString(),
-            pnl: (Math.random() * 20 - 10).toFixed(2) // Simulated PnL
+        // Backend'e pozisyon kapatma isteği gönder
+        const response = await fetch('/api/user/close-position', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${await currentUser.getIdToken()}`
+            },
+            body: JSON.stringify({ 
+                symbol: symbol, 
+                positionSide: side 
+            })
         });
         
-        // Update user stats
-        const currentTrades = userData.total_trades || 0;
-        await database.ref(`users/${currentUser.uid}`).update({
-            total_trades: currentTrades + 1,
-            last_trade_time: firebase.database.ServerValue.TIMESTAMP
-        });
+        const result = await response.json();
         
-        showToast(`${symbol} pozisyonu başarıyla kapatıldı!`, 'success');
+        if (response.ok && result.success) {
+            showToast(`${symbol} pozisyonu başarıyla kapatıldı! PnL: ${result.pnl || 0} USDT`, 'success');
+        } else {
+            throw new Error(result.detail || result.message || 'Pozisyon kapatılamadı');
+        }
         
         // Refresh data
         setTimeout(() => {
@@ -837,7 +968,7 @@ async function closePosition(symbol, side) {
         
     } catch (error) {
         console.error('Error closing position:', error);
-        showToast('Pozisyon kapatılırken hata oluştu', 'error');
+        showToast(`Pozisyon kapatılırken hata: ${error.message}`, 'error');
     }
 }
 
