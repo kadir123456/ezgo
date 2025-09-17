@@ -1,1128 +1,548 @@
-/* =================================================================== */
-/* Admin Panel CSS - Dashboard ile uyumlu modern tasarım             */
-/* =================================================================== */
-
-:root {
-    --primary-color: #2563eb;
-    --primary-hover: #1d4ed8;
-    --secondary-color: #64748b;
-    --success-color: #16a34a;
-    --danger-color: #dc2626;
-    --warning-color: #f59e0b;
-    --info-color: #0891b2;
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - EzyagoTrading</title>
+    <meta name="description" content="EzyagoTrading Dashboard - Kripto futures trading bot kontrolü">
     
-    --background-color: #0f172a;
-    --background-secondary: #1e293b;
-    --card-background: #1e293b;
-    --card-background-secondary: #334155;
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     
-    --text-primary: #f8fafc;
-    --text-secondary: #cbd5e1;
-    --text-muted: #94a3b8;
+    <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="loading-content">
+            <div class="loading-logo">
+                <i class="fas fa-chart-line"></i>
+                <span>EzyagoTrading</span>
+            </div>
+            <div class="loading-spinner"></div>
+            <p>Dashboard yükleniyor...</p>
+        </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="dashboard" class="dashboard hidden">
+        <!-- Desktop Header -->
+        <header class="dashboard-header">
+            <div class="container">
+                <div class="header-content">
+                    <div class="logo">
+                        <i class="fas fa-chart-line"></i>
+                        <span>EzyagoTrading</span>
+                    </div>
+                    
+                    <div class="header-info">
+                        <div class="user-info">
+                            <span id="user-name">Kullanıcı</span>
+                            <div class="subscription-badge" id="subscription-badge">
+                                <i class="fas fa-crown"></i>
+                                <span id="subscription-text">Premium</span>
+                            </div>
+                        </div>
+                        
+                        <div class="header-actions">
+                            <button class="btn btn-outline btn-sm" id="settings-btn">
+                                <i class="fas fa-cog"></i>
+                            </button>
+                            <button class="btn btn-danger btn-sm" id="logout-btn">
+                                <i class="fas fa-sign-out-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Mobile Header -->
+        <header class="mobile-header">
+            <div class="mobile-header-content">
+                <div class="logo">
+                    <i class="fas fa-chart-line"></i>
+                    <span>EzyagoTrading</span>
+                </div>
+                <button class="hamburger-menu" id="hamburger-menu">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Mobile Menu -->
+        <div class="mobile-menu" id="mobile-menu">
+            <div class="mobile-menu-content">
+                <div class="mobile-menu-header">
+                    <div class="logo">
+                        <i class="fas fa-chart-line"></i>
+                        <span>EzyagoTrading</span>
+                    </div>
+                    <button class="mobile-menu-close" id="mobile-menu-close">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <div class="mobile-menu-items">
+                    <a href="#" class="mobile-menu-item" id="mobile-api-btn">
+                        <i class="fas fa-key"></i>
+                        <span>API Anahtarları</span>
+                    </a>
+                    <a href="#" class="mobile-menu-item" id="mobile-purchase-btn">
+                        <i class="fas fa-credit-card"></i>
+                        <span>Abonelik Satın Al</span>
+                    </a>
+                    <a href="#" class="mobile-menu-item" id="mobile-support-btn">
+                        <i class="fas fa-life-ring"></i>
+                        <span>Destek</span>
+                    </a>
+                    <a href="#" class="mobile-menu-item" id="mobile-logout-btn">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Çıkış Yap</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="container">
+                <div class="dashboard-grid">
+                    <!-- User Profile Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>
+                                <i class="fas fa-user"></i>
+                                Hesap Bilgileri
+                            </h2>
+                            <button class="btn btn-outline btn-sm" id="refresh-account-btn">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                        <div class="card-content">
+                            <div class="account-stats">
+                                <div class="stat-item">
+                                    <div class="stat-icon primary">
+                                        <i class="fas fa-wallet"></i>
+                                    </div>
+                                    <div class="stat-info">
+                                        <div class="stat-value" id="total-balance">0.00 USDT</div>
+                                        <div class="stat-label">Toplam Bakiye</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="stat-item">
+                                    <div class="stat-icon success">
+                                        <i class="fas fa-chart-line"></i>
+                                    </div>
+                                    <div class="stat-info">
+                                        <div class="stat-value" id="total-trades">0</div>
+                                        <div class="stat-label">Toplam İşlem</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="stat-item">
+                                    <div class="stat-icon warning">
+                                        <i class="fas fa-percentage"></i>
+                                    </div>
+                                    <div class="stat-info">
+                                        <div class="stat-value" id="win-rate">0%</div>
+                                        <div class="stat-label">Başarı Oranı</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="stat-item">
+                                    <div class="stat-icon info">
+                                        <i class="fas fa-coins"></i>
+                                    </div>
+                                    <div class="stat-info">
+                                        <div class="stat-value" id="total-pnl">+0.00 USDT</div>
+                                        <div class="stat-label">Toplam P&L</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="subscription-info">
+                                <h3>Abonelik Durumu</h3>
+                                <div class="subscription-details">
+                                    <div class="subscription-status">
+                                        <span>Durum:</span>
+                                        <span class="status-badge trial" id="sub-status-badge">
+                                            <i class="fas fa-clock"></i>
+                                            <span>Deneme</span>
+                                        </span>
+                                    </div>
+                                    <div class="subscription-status">
+                                        <span>Kalan Süre:</span>
+                                        <span id="days-remaining">7 gün kaldı</span>
+                                    </div>
+                                    <p class="subscription-note" id="subscription-note">
+                                        Aboneliğiniz aktif durumda.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bot Control Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>
+                                <i class="fas fa-robot"></i>
+                                Bot Kontrolü
+                            </h2>
+                            <div class="bot-status">
+                                <div class="status-dot" id="status-dot"></div>
+                                <span id="status-text">Durduruldu</span>
+                            </div>
+                        </div>
+                        <div class="card-content">
+                            <!-- API Status -->
+                            <div class="api-status-box" id="api-status">
+                                <div class="api-status-indicator error" id="api-status-indicator">
+                                    <i class="fas fa-key"></i>
+                                    <span>API anahtarları gerekli</span>
+                                </div>
+                                <button class="btn btn-primary btn-sm" id="manage-api-btn">
+                                    API Anahtarlarını Ekle
+                                </button>
+                            </div>
+
+                            <!-- Trading Settings -->
+                            <div class="trading-settings" id="trading-settings" style="display: none;">
+                                <div class="setting-group">
+                                    <label for="trading-symbols">Trading Çiftleri (virgülle ayırın):</label>
+                                    <input type="text" id="trading-symbols" class="form-input" value="BTCUSDT, ETHUSDT" placeholder="BTCUSDT, ETHUSDT, BNBUSDT">
+                                </div>
+                                
+                                <div class="setting-row">
+                                    <div class="setting-group">
+                                        <label for="timeframe-select">Zaman Dilimi:</label>
+                                        <select id="timeframe-select" class="form-input">
+                                            <option value="5m">5 Dakika</option>
+                                            <option value="15m" selected>15 Dakika</option>
+                                            <option value="30m">30 Dakika</option>
+                                            <option value="1h">1 Saat</option>
+                                            <option value="4h">4 Saat</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <div class="setting-group">
+                                        <label for="leverage-select">Kaldıraç:</label>
+                                        <select id="leverage-select" class="form-input">
+                                            <option value="5">5x</option>
+                                            <option value="10" selected>10x</option>
+                                            <option value="20">20x</option>
+                                            <option value="50">50x</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                
+                                <div class="setting-row">
+                                    <div class="setting-group">
+                                        <label for="order-size">İşlem Tutarı (USDT):</label>
+                                        <input type="number" id="order-size" class="form-input" value="35" min="10" max="1000" step="5">
+                                    </div>
+                                    
+                                    <div class="setting-group">
+                                        <label for="max-daily-trades">Günlük Max İşlem:</label>
+                                        <input type="number" id="max-daily-trades" class="form-input" value="10" min="1" max="50">
+                                    </div>
+                                </div>
+                                
+                                <div class="setting-row">
+                                    <div class="setting-group">
+                                        <label for="stop-loss">Stop Loss (%):</label>
+                                        <input type="number" id="stop-loss" class="form-input" value="2" min="0.1" max="25" step="0.1">
+                                    </div>
+                                    
+                                    <div class="setting-group">
+                                        <label for="take-profit">Take Profit (%):</label>
+                                        <input type="number" id="take-profit" class="form-input" value="4" min="0.1" max="50" step="0.1">
+                                    </div>
+                                </div>
+
+                                <!-- Advanced Settings -->
+                                <div class="advanced-settings">
+                                    <div class="settings-header" onclick="toggleAdvancedSettings()">
+                                        <h4>Gelişmiş Ayarlar</h4>
+                                        <button type="button" class="settings-toggle" id="advanced-toggle">
+                                            <i class="fas fa-chevron-down"></i>
+                                        </button>
+                                    </div>
+                                    <div class="advanced-settings-content" id="advanced-settings-content">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="auto-compound" checked>
+                                            <span>Otomatik Bileşik Faiz (Kazançları yeniden yatır)</span>
+                                        </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="manual-trading">
+                                            <span>Manuel Trading İzni (Bot dışında işlem yapabilme)</span>
+                                        </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="notifications-enabled" checked>
+                                            <span>Bildirimler Aktif</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Control Buttons -->
+                            <div class="control-buttons" id="control-buttons" style="display: none;">
+                                <button class="btn btn-success" id="start-bot-btn">
+                                    <i class="fas fa-play"></i>
+                                    Bot'u Başlat
+                                </button>
+                                <button class="btn btn-danger" id="stop-bot-btn" disabled>
+                                    <i class="fas fa-stop"></i>
+                                    Bot'u Durdur
+                                </button>
+                            </div>
+
+                            <!-- Status Message -->
+                            <div class="status-message info">
+                                <i class="fas fa-info-circle"></i>
+                                <span id="status-message-text">Bot'u çalıştırmak için API anahtarlarınızı eklemelisiniz.</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Positions Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>
+                                <i class="fas fa-chart-bar"></i>
+                                Açık Pozisyonlar
+                            </h2>
+                            <button class="btn btn-outline btn-sm" id="refresh-positions-btn">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                        <div class="card-content">
+                            <div id="positions-container">
+                                <div class="empty-state">
+                                    <i class="fas fa-chart-line"></i>
+                                    <h3>Açık Pozisyon Yok</h3>
+                                    <p>Bot başlatıldığında pozisyonlar burada görünecek</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Activity Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>
+                                <i class="fas fa-history"></i>
+                                Son İşlemler
+                            </h2>
+                            <button class="btn btn-outline btn-sm" id="refresh-activity-btn">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                        <div class="card-content">
+                            <div id="activity-list">
+                                <div class="empty-state">
+                                    <i class="fas fa-history"></i>
+                                    <h3>Henüz İşlem Yok</h3>
+                                    <p>Bot başladığında işlemler burada görünecek</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- API Configuration Modal -->
+    <div class="modal" id="api-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>
+                    <i class="fas fa-key"></i>
+                    Binance API Anahtarları
+                </h3>
+                <button class="modal-close" id="api-modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="api-instructions">
+                    <h4><i class="fas fa-info-circle"></i> Binance API Anahtarı Nasıl Alınır?</h4>
+                    <ol>
+                        <li>Binance hesabınıza giriş yapın</li>
+                        <li>API Management → Create API bölümüne gidin</li>
+                        <li>API Key oluşturun ve "Enable Futures" seçeneğini işaretleyin</li>
+                        <li>IP Restriction'a aşağıdaki IP'leri ekleyin:</li>
+                    </ol>
+                    
+                    <div class="server-ips-container">
+                        <div class="server-ips-box">
+                            <span class="server-ips-text" id="server-ips-text">IP adresleri yükleniyor...</span>
+                            <button type="button" class="copy-btn" id="copy-ips-btn" title="IP'leri kopyala">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <form id="api-form">
+                    <div class="form-group">
+                        <label for="api-key">API Key:</label>
+                        <input type="text" id="api-key" class="form-input" placeholder="Binance API Key" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="api-secret">API Secret:</label>
+                        <input type="password" id="api-secret" class="form-input" placeholder="Binance API Secret" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="api-testnet">
+                            <span>Testnet kullan (demo trading)</span>
+                        </label>
+                    </div>
+                    
+                    <div class="api-test-result" id="api-test-result"></div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" id="cancel-api-btn">İptal</button>
+                <button type="submit" class="btn btn-primary" id="save-api-btn" form="api-form">
+                    <i class="fas fa-save"></i>
+                    Kaydet ve Test Et
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Purchase Modal -->
+    <div class="modal" id="purchase-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>
+                    <i class="fas fa-credit-card"></i>
+                    Abonelik Satın Al
+                </h3>
+                <button class="modal-close" id="purchase-modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="payment-section">
+                    <div class="payment-amount" id="payment-amount">$15/Ay</div>
+                    
+                    <div class="form-group">
+                        <label>TRC20 (USDT) Ödeme Adresi:</label>
+                        <div class="payment-address">
+                            <span id="payment-address-text">Yükleniyor...</span>
+                            <button type="button" class="copy-btn" id="copy-address-btn">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="transaction-hash">İşlem Hash'i:</label>
+                        <input type="text" id="transaction-hash" class="form-input" placeholder="Ödeme sonrası işlem hash'ini girin" required>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" id="cancel-purchase-btn">İptal</button>
+                <button type="button" class="btn btn-success" id="confirm-payment-btn">
+                    <i class="fas fa-check"></i>
+                    Ödeme Bildir
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Support Modal -->
+    <div class="modal" id="support-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>
+                    <i class="fas fa-life-ring"></i>
+                    Destek Talebi
+                </h3>
+                <button class="modal-close" id="support-modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="support-subject">Konu:</label>
+                    <select id="support-subject" class="form-input" required>
+                        <option value="">Konu seçin</option>
+                        <option value="api-problem">API Bağlantı Sorunu</option>
+                        <option value="bot-issue">Bot Çalışma Sorunu</option>
+                        <option value="payment-issue">Ödeme Sorunu</option>
+                        <option value="account-issue">Hesap Sorunu</option>
+                        <option value="general">Genel Soru</option>
+                        <option value="feature-request">Özellik İsteği</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="support-message">Mesajınız:</label>
+                    <textarea id="support-message" class="form-input support-message" rows="5" placeholder="Sorununuzu detaylı olarak açıklayın..." required></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" id="cancel-support-btn">İptal</button>
+                <button type="button" class="btn btn-primary" id="send-support-btn">
+                    <i class="fas fa-paper-plane"></i>
+                    Destek Talebi Gönder
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast">
+        <div class="toast-content">
+            <i class="toast-icon fas fa-info-circle"></i>
+            <span class="toast-message" id="toast-message">Bildirim mesajı</span>
+        </div>
+        <button class="toast-close" id="toast-close">
+            <i class="fas fa-times"></i>
+        </button>
+    </div>
+
+    <!-- Firebase Scripts -->
+    <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-database-compat.js"></script>
+
+    <!-- Configuration loader -->
+    <script src="/static/js/config.js"></script>
     
-    --border-color: #334155;
-    --border-light: #475569;
-    --box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.2);
-    --box-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+    <!-- Dashboard JavaScript -->
+    <script src="/static/dashboard.js"></script>
     
-    --font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-*, *::before, *::after {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-}
-
-body {
-    font-family: var(--font-family);
-    background: var(--background-color);
-    color: var(--text-primary);
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    overflow-x: hidden;
-}
-
-.container {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 0 1rem;
-}
-
-/* =================================================================== */
-/* Loading Screen                                                     */
-/* =================================================================== */
-
-.loading-screen {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: var(--background-color);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 9999;
-    flex-direction: column;
-    gap: 1.5rem;
-    transition: opacity 0.3s ease;
-}
-
-.loading-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 1rem;
-    text-align: center;
-}
-
-.loading-logo {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
-    font-size: 1.75rem;
-    font-weight: 800;
-    color: var(--text-primary);
-}
-
-.loading-logo i {
-    color: var(--primary-color);
-    font-size: 2rem;
-}
-
-.loading-spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid var(--border-color);
-    border-top: 3px solid var(--primary-color);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-.loading-content p {
-    color: var(--text-secondary);
-    font-size: 1rem;
-}
-
-.hidden {
-    display: none !important;
-}
-
-/* =================================================================== */
-/* Admin Layout                                                       */
-/* =================================================================== */
-
-.admin-layout {
-    min-height: 100vh;
-    background: var(--background-color);
-    display: flex;
-    flex-direction: column;
-}
-
-.admin-layout.hidden {
-    display: none;
-}
-
-/* =================================================================== */
-/* Header                                                             */
-/* =================================================================== */
-
-.admin-header {
-    background: var(--card-background);
-    border-bottom: 1px solid var(--border-color);
-    padding: 1rem 0;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    box-shadow: var(--box-shadow);
-}
-
-.admin-header-content {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 1rem;
-}
-
-.admin-logo {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.admin-logo i {
-    color: var(--primary-color);
-    font-size: 1.75rem;
-}
-
-.admin-logo div h1 {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin: 0;
-}
-
-.admin-logo div p {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    margin: 0;
-}
-
-.admin-actions {
-    display: flex;
-    gap: 0.5rem;
-}
-
-/* =================================================================== */
-/* Buttons                                                            */
-/* =================================================================== */
-
-.btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    padding: 0.75rem 1rem;
-    border: none;
-    border-radius: 0.5rem;
-    font-size: 0.875rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: var(--transition);
-    text-decoration: none;
-    user-select: none;
-    min-height: 40px;
-}
-
-.btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none !important;
-}
-
-.btn-primary {
-    background: linear-gradient(135deg, var(--primary-color), var(--primary-hover));
-    color: white;
-    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
-}
-
-.btn-primary:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5);
-}
-
-.btn-success {
-    background: linear-gradient(135deg, var(--success-color), #15803d);
-    color: white;
-    box-shadow: 0 4px 14px rgba(22, 163, 74, 0.4);
-}
-
-.btn-success:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 20px rgba(22, 163, 74, 0.5);
-}
-
-.btn-danger {
-    background: linear-gradient(135deg, var(--danger-color), #b91c1c);
-    color: white;
-    box-shadow: 0 4px 14px rgba(220, 38, 38, 0.4);
-}
-
-.btn-danger:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 20px rgba(220, 38, 38, 0.5);
-}
-
-.btn-outline {
-    background: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-primary);
-}
-
-.btn-outline:hover:not(:disabled) {
-    background: var(--background-secondary);
-    border-color: var(--border-light);
-}
-
-.btn-sm {
-    padding: 0.5rem 0.75rem;
-    font-size: 0.8rem;
-    min-height: 32px;
-}
-
-/* =================================================================== */
-/* Main Content                                                       */
-/* =================================================================== */
-
-.admin-main {
-    flex: 1;
-    padding: 2rem 0;
-    min-height: calc(100vh - 200px);
-}
-
-.admin-content {
-    display: flex;
-    flex-direction: column;
-    gap: 2rem;
-}
-
-/* =================================================================== */
-/* Statistics Cards                                                   */
-/* =================================================================== */
-
-.admin-stats {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1.5rem;
-}
-
-.stat-card {
-    background: var(--card-background);
-    padding: 1.5rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--border-color);
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    transition: var(--transition);
-    position: relative;
-    overflow: hidden;
-}
-
-.stat-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: linear-gradient(135deg, var(--primary-color), var(--info-color));
-}
-
-.stat-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--box-shadow-lg);
-}
-
-.stat-icon {
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.5rem;
-    color: white;
-    flex-shrink: 0;
-}
-
-.stat-icon.primary { background: linear-gradient(135deg, var(--primary-color), var(--primary-hover)); }
-.stat-icon.success { background: linear-gradient(135deg, var(--success-color), #15803d); }
-.stat-icon.warning { background: linear-gradient(135deg, var(--warning-color), #ea580c); }
-.stat-icon.danger { background: linear-gradient(135deg, var(--danger-color), #b91c1c); }
-
-.stat-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.stat-value {
-    font-size: 2rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    line-height: 1.2;
-    margin-bottom: 0.25rem;
-}
-
-.stat-label {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-weight: 500;
-}
-
-/* =================================================================== */
-/* Sections & Cards                                                   */
-/* =================================================================== */
-
-.admin-section {
-    background: var(--card-background);
-    border-radius: 0.75rem;
-    border: 1px solid var(--border-color);
-    overflow: hidden;
-    box-shadow: var(--box-shadow);
-}
-
-.section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1.5rem;
-    border-bottom: 1px solid var(--border-color);
-    background: var(--background-secondary);
-}
-
-.section-header h2 {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.section-header h2 i {
-    color: var(--primary-color);
-    font-size: 1.5rem;
-}
-
-.section-actions {
-    display: flex;
-    gap: 0.5rem;
-}
-
-/* =================================================================== */
-/* Tables                                                             */
-/* =================================================================== */
-
-.table-container {
-    overflow-x: auto;
-    position: relative;
-}
-
-.table-responsive {
-    min-width: 900px;
-}
-
-.data-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-.data-table th {
-    background: var(--background-secondary);
-    color: var(--text-secondary);
-    font-weight: 600;
-    padding: 1rem;
-    text-align: left;
-    border-bottom: 1px solid var(--border-color);
-    font-size: 0.875rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-}
-
-.data-table td {
-    padding: 1rem;
-    border-bottom: 1px solid var(--border-color);
-    color: var(--text-primary);
-    vertical-align: top;
-}
-
-.data-table tr:hover {
-    background: var(--background-secondary);
-}
-
-.data-table .text-center {
-    text-align: center;
-}
-
-.loading-message {
-    color: var(--text-secondary);
-    font-style: italic;
-}
-
-/* =================================================================== */
-/* User Info Cells                                                   */
-/* =================================================================== */
-
-.user-info {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-}
-
-.email-text {
-    font-weight: 600;
-    color: var(--text-primary);
-    font-size: 0.95rem;
-}
-
-.join-date {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-}
-
-.user-language {
-    font-size: 0.7rem;
-    color: var(--info-color);
-    background: rgba(8, 145, 178, 0.2);
-    padding: 0.125rem 0.375rem;
-    border-radius: 0.25rem;
-    text-transform: uppercase;
-    font-weight: 600;
-    display: inline-block;
-    margin-top: 0.25rem;
-    width: fit-content;
-}
-
-/* =================================================================== */
-/* Status Badges                                                      */
-/* =================================================================== */
-
-.status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    padding: 0.375rem 0.75rem;
-    border-radius: 99px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    border: 1px solid transparent;
-}
-
-.status-badge.active {
-    background: rgba(22, 163, 74, 0.2);
-    color: var(--success-color);
-    border-color: rgba(22, 163, 74, 0.3);
-}
-
-.status-badge.trial {
-    background: rgba(245, 158, 11, 0.2);
-    color: var(--warning-color);
-    border-color: rgba(245, 158, 11, 0.3);
-}
-
-.status-badge.expired,
-.status-badge.inactive {
-    background: rgba(220, 38, 38, 0.2);
-    color: var(--danger-color);
-    border-color: rgba(220, 38, 38, 0.3);
-}
-
-/* =================================================================== */
-/* Expiry Info                                                        */
-/* =================================================================== */
-
-.expiry-info {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-}
-
-.expiry-date {
-    font-weight: 600;
-    color: var(--text-primary);
-    font-size: 0.9rem;
-}
-
-.days-remaining {
-    font-size: 0.75rem;
-    font-weight: 500;
-    padding: 0.125rem 0.375rem;
-    border-radius: 0.25rem;
-    width: fit-content;
-}
-
-.days-remaining.positive {
-    color: var(--success-color);
-    background: rgba(22, 163, 74, 0.1);
-}
-
-.days-remaining.warning {
-    color: var(--warning-color);
-    background: rgba(245, 158, 11, 0.1);
-}
-
-.days-remaining.expired {
-    color: var(--danger-color);
-    background: rgba(220, 38, 38, 0.1);
-}
-
-/* =================================================================== */
-/* User ID                                                           */
-/* =================================================================== */
-
-.user-id-text {
-    font-family: 'Courier New', monospace;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: var(--transition);
-    padding: 0.25rem 0.5rem;
-    border-radius: 0.25rem;
-    border: 1px solid transparent;
-}
-
-.user-id-text:hover {
-    color: var(--primary-color);
-    background: rgba(37, 99, 235, 0.1);
-    border-color: rgba(37, 99, 235, 0.2);
-}
-
-/* =================================================================== */
-/* Action Buttons                                                    */
-/* =================================================================== */
-
-.actions-cell {
-    white-space: nowrap;
-}
-
-.action-buttons {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-}
-
-.btn-text {
-    display: none;
-}
-
-/* =================================================================== */
-/* Quick Actions                                                     */
-/* =================================================================== */
-
-.quick-actions {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 1rem;
-    padding: 1.5rem;
-}
-
-.action-card {
-    background: var(--background-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 0.5rem;
-    padding: 1.5rem;
-    cursor: pointer;
-    transition: var(--transition);
-    text-align: center;
-    color: var(--text-primary);
-    position: relative;
-    overflow: hidden;
-}
-
-.action-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: linear-gradient(135deg, var(--primary-color), var(--info-color));
-    transform: scaleX(0);
-    transition: var(--transition);
-}
-
-.action-card:hover {
-    background: var(--card-background-secondary);
-    transform: translateY(-2px);
-    box-shadow: var(--box-shadow);
-}
-
-.action-card:hover::before {
-    transform: scaleX(1);
-}
-
-.action-card i {
-    font-size: 2rem;
-    color: var(--primary-color);
-    margin-bottom: 1rem;
-    display: block;
-}
-
-.action-card h3 {
-    font-size: 1.1rem;
-    font-weight: 600;
-    margin-bottom: 0.5rem;
-    color: var(--text-primary);
-}
-
-.action-card p {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    line-height: 1.5;
-}
-
-/* =================================================================== */
-/* Status Messages                                                   */
-/* =================================================================== */
-
-.status-message {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.875rem 1rem;
-    border-radius: 0.5rem;
-    font-size: 0.875rem;
-    margin: 1rem 1.5rem;
-    transition: var(--transition);
-    border: 1px solid transparent;
-}
-
-.status-message.error {
-    background: rgba(220, 38, 38, 0.1);
-    color: var(--danger-color);
-    border-color: rgba(220, 38, 38, 0.2);
-}
-
-.status-message.success {
-    background: rgba(22, 163, 74, 0.1);
-    color: var(--success-color);
-    border-color: rgba(22, 163, 74, 0.2);
-}
-
-.status-message.info {
-    background: rgba(8, 145, 178, 0.1);
-    color: var(--info-color);
-    border-color: rgba(8, 145, 178, 0.2);
-}
-
-/* =================================================================== */
-/* Footer                                                            */
-/* =================================================================== */
-
-.admin-footer {
-    background: var(--card-background);
-    border-top: 1px solid var(--border-color);
-    padding: 1.5rem 0;
-    margin-top: auto;
-    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.admin-footer-content {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 1rem;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-}
-
-.footer-warning {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: var(--warning-color);
-    font-weight: 500;
-    background: rgba(245, 158, 11, 0.1);
-    padding: 0.5rem 1rem;
-    border-radius: 0.375rem;
-    border: 1px solid rgba(245, 158, 11, 0.2);
-}
-
-/* =================================================================== */
-/* Animations & Effects                                              */
-/* =================================================================== */
-
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-@keyframes slideUp {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.fade-in {
-    animation: fadeIn 0.3s ease-in-out;
-}
-
-.slide-up {
-    animation: slideUp 0.4s ease-out;
-}
-
-/* =================================================================== */
-/* Mobile Responsive                                                 */
-/* =================================================================== */
-
-@media (max-width: 1024px) {
-    .admin-stats {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 1rem;
-    }
-    
-    .table-responsive {
-        min-width: 700px;
-    }
-    
-    .section-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 1rem;
-    }
-    
-    .section-actions {
-        width: 100%;
-        justify-content: flex-start;
-    }
-    
-    .nav-tab {
-        flex: 1;
-        text-align: center;
-        min-width: 120px;
-    }
-}
-
-@media (max-width: 768px) {
-    .container {
-        padding: 0 0.75rem;
-    }
-    
-    .admin-header-content {
-        flex-direction: column;
-        text-align: center;
-        gap: 0.75rem;
-    }
-    
-    .admin-main {
-        padding: 1rem 0;
-    }
-    
-    .admin-stats {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 0.75rem;
-    }
-    
-    .stat-card {
-        padding: 1rem;
-    }
-    
-    .stat-icon {
-        width: 48px;
-        height: 48px;
-        font-size: 1.25rem;
-    }
-    
-    .stat-value {
-        font-size: 1.5rem;
-    }
-    
-    .section-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 1rem;
-    }
-    
-    .section-header > div {
-        width: 100%;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.5rem;
-    }
-    
-    .nav-tab {
-        flex: 1;
-        min-width: 100px;
-        padding: 0.75rem 0.5rem;
-        font-size: 0.875rem;
-    }
-    
-    .table-responsive {
-        min-width: 600px;
-    }
-    
-    .action-buttons {
-        flex-direction: column;
-        gap: 0.25rem;
-    }
-    
-    .btn-text {
-        display: inline;
-    }
-    
-    .quick-actions {
-        grid-template-columns: 1fr;
-        gap: 1rem;
-        padding: 1rem;
-    }
-    
-    .user-info {
-        gap: 0.125rem;
-    }
-    
-    .email-text {
-        font-size: 0.875rem;
-    }
-    
-    .expiry-date {
-        font-size: 0.8rem;
-    }
-    
-    .data-table th,
-    .data-table td {
-        padding: 0.75rem 0.5rem;
-    }
-    
-    /* Mobile table improvements */
-    .user-info {
-        min-width: 150px;
-    }
-    
-    .expiry-info {
-        min-width: 120px;
-    }
-    
-    .user-id-text {
-        font-size: 0.75rem;
-        max-width: 80px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-}
-
-@media (max-width: 480px) {
-    .admin-stats {
-        grid-template-columns: 1fr;
-        gap: 0.5rem;
-    }
-    
-    .stat-card {
-        padding: 1rem;
-    }
-    
-    .stat-icon {
-        width: 40px;
-        height: 40px;
-        font-size: 1rem;
-    }
-    
-    .stat-value {
-        font-size: 1.25rem;
-    }
-    
-    .section-header h2 {
-        font-size: 1.1rem;
-    }
-    
-    .admin-footer-content {
-        flex-direction: column;
-        text-align: center;
-        gap: 0.5rem;
-    }
-    
-    .data-table th,
-    .data-table td {
-        padding: 0.5rem 0.25rem;
-        font-size: 0.8rem;
-    }
-    
-    .btn-sm {
-        padding: 0.375rem 0.5rem;
-        font-size: 0.75rem;
-    }
-    
-    /* Mobile-first admin panel */
-    .admin-header-content {
-        padding: 0.5rem 0;
-    }
-    
-    .admin-logo div h1 {
-        font-size: 1.1rem;
-    }
-    
-    .admin-logo div p {
-        font-size: 0.8rem;
-    }
-    
-    .nav-tab {
-        padding: 0.625rem 0.375rem;
-        font-size: 0.8rem;
-        min-width: 80px;
-    }
-    
-    .nav-tab i {
-        display: none;
-    }
-    
-    /* Horizontal scroll for table */
-    .table-container {
-        -webkit-overflow-scrolling: touch;
-    }
-    
-    .table-responsive {
-        min-width: 500px;
-    }
-    
-    /* Stack action buttons vertically on very small screens */
-    .action-buttons {
-        flex-direction: column;
-        gap: 0.25rem;
-        min-width: 60px;
-    }
-    
-    .action-buttons .btn-sm {
-        padding: 0.25rem 0.375rem;
-        font-size: 0.7rem;
-        min-height: 28px;
-    }
-    
-    .action-buttons .btn-text {
-        display: none;
-    }
-}
-
-/* =================================================================== */
-/* Focus States for Accessibility                                    */
-/* =================================================================== */
-
-.btn:focus-visible,
-.user-id-text:focus-visible,
-.action-card:focus-visible {
-    outline: 2px solid var(--primary-color);
-    outline-offset: 2px;
-}
-
-/* =================================================================== */
-/* High Contrast Mode                                                */
-/* =================================================================== */
-
-@media (prefers-contrast: high) {
-    :root {
-        --border-color: #64748b;
-        --text-secondary: #e2e8f0;
-    }
-}
-
-/* =================================================================== */
-/* Modal Styles                                                       */
-/* =================================================================== */
-
-.modal {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.8);
-    z-index: 10000;
-    align-items: center;
-    justify-content: center;
-    padding: 1rem;
-}
-
-.modal-content {
-    background: var(--card-background);
-    border-radius: 0.75rem;
-    max-width: 500px;
-    width: 100%;
-    max-height: 90vh;
-    overflow-y: auto;
-    border: 1px solid var(--border-color);
-    box-shadow: var(--box-shadow-lg);
-}
-
-.modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1.5rem;
-    border-bottom: 1px solid var(--border-color);
-    background: var(--background-secondary);
-}
-
-.modal-header h3 {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin: 0;
-}
-
-.modal-close {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-    padding: 0.5rem;
-    border-radius: 0.25rem;
-    font-size: 1.25rem;
-    transition: var(--transition);
-}
-
-.modal-close:hover {
-    background: var(--background-color);
-    color: var(--text-primary);
-}
-
-.modal-body {
-    padding: 1.5rem;
-}
-
-.modal-footer {
-    padding: 1.5rem;
-    border-top: 1px solid var(--border-color);
-    display: flex;
-    gap: 1rem;
-    justify-content: flex-end;
-}
-
-.form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-}
-
-.form-group label {
-    font-weight: 500;
-    color: var(--text-primary);
-    font-size: 0.875rem;
-}
-
-.form-input {
-    width: 100%;
-    padding: 0.875rem 1rem;
-    border: 1px solid var(--border-color);
-    border-radius: 0.5rem;
-    background: var(--background-secondary);
-    color: var(--text-primary);
-    font-size: 1rem;
-    transition: var(--transition);
-}
-
-.form-input:focus {
-    outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
-}
-
-/* =================================================================== */
-/* Reduced Motion                                                    */
-/* =================================================================== */
-
-@media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-    }
-}
+    <script>
+        // Advanced settings toggle
+        function toggleAdvancedSettings() {
+            const content = document.getElementById('advanced-settings-content');
+            const toggle = document.getElementById('advanced-toggle');
+            
+            if (content && toggle) {
+                const isShowing = content.classList.contains('show');
+                
+                if (isShowing) {
+                    content.classList.remove('show');
+                    toggle.innerHTML = '<i class="fas fa-chevron-down"></i>';
+                } else {
+                    content.classList.add('show');
+                    toggle.innerHTML = '<i class="fas fa-chevron-up"></i>';
+                }
+            }
+        }
+    </script>
+</body>
+</html>
