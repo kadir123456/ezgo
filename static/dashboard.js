@@ -263,6 +263,8 @@ async function loadPaymentInfo() {
         const serverIpsText = document.getElementById('server-ips-text');
         if (serverIpsText && appInfo.server_ips) {
             serverIpsText.textContent = appInfo.server_ips;
+        } else if (serverIpsText) {
+            serverIpsText.textContent = 'Server IP bilgisi bulunamadı';
         }
         
         console.log('Payment and server info loaded');
