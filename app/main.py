@@ -1,16 +1,21 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime, timezone
 from app.config import settings
+from app.utils.metrics import metrics, get_metrics_data, get_metrics_content_type
 import logging
+import time
 
 # Setup basic logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger("main")
 
-# FastAPI uygulama başlatma - environment'a göre
+# FastAPI uygulama başlatma
 app = FastAPI(
     title="EzyagoTrading API",
     description="Professional Crypto Futures Trading Bot",
@@ -21,24 +26,58 @@ app = FastAPI(
 # CORS middleware ekle
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.DEBUG else ["https://www.ezyago.com", "https://ezyago.com"],
+    allow_origins=["*"] if settings.DEBUG else [
+        "https://www.ezyago.com", 
+        "https://ezyago.com",
+        "https://ezyagotrading.onrender.com"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    
+    # Maintenance mode check
+    if settings.MAINTENANCE_MODE and not request.url.path.startswith("/health"):
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Maintenance mode", "message": settings.MAINTENANCE_MESSAGE}
+        )
+    
+    response = await call_next(request)
+    
+    # Log request
+    process_time = time.time() - start_time
+    metrics.record_api_request(
+        str(request.url.path),
+        request.method,
+        response.status_code,
+        process_time
+    )
+    
+    return response
+
 # Static files mount
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Import routes
-from app.routes.auth import router as auth_router
-from app.routes.bot import router as bot_router
-from app.routes.user import router as user_router
-
-# Include routers
-app.include_router(auth_router)
-app.include_router(bot_router)
-app.include_router(user_router)
+try:
+    from app.routes.auth import router as auth_router
+    from app.routes.bot import router as bot_router
+    from app.routes.user import router as user_router
+    
+    # Include routers
+    app.include_router(auth_router)
+    app.include_router(bot_router)
+    app.include_router(user_router)
+    
+    logger.info("All routes loaded successfully")
+except Exception as e:
+    logger.error(f"Error loading routes: {e}")
 
 @app.on_event("startup")
 async def startup_event():
@@ -48,39 +87,63 @@ async def startup_event():
     logger.info(f"Debug mode: {settings.DEBUG}")
     logger.info(f"Maintenance mode: {settings.MAINTENANCE_MODE}")
     
+    # Firebase bağlantısını kontrol et
+    try:
+        from app.firebase_manager import firebase_manager
+        if firebase_manager.is_initialized():
+            logger.info("Firebase connection verified")
+        else:
+            logger.warning("Firebase connection failed")
+    except Exception as e:
+        logger.error(f"Firebase check error: {e}")
+    
     # Ayarları doğrula
     try:
-        if not settings.validate_settings():
+        is_valid = settings.validate_settings()
+        if not is_valid:
             logger.warning("Some configuration issues detected")
+        else:
+            logger.info("All settings validated successfully")
     except Exception as e:
         logger.error(f"Settings validation error: {e}")
-    
-    try:
-        settings.print_settings()
-    except Exception as e:
-        logger.error(f"Settings print error: {e}")
 
-# Maintenance mode middleware
-@app.middleware("http")
-async def maintenance_middleware(request, call_next):
-    if settings.MAINTENANCE_MODE and not request.url.path.startswith("/health"):
-        return JSONResponse(
-            status_code=503,
-            content={"error": "Maintenance mode", "message": settings.MAINTENANCE_MESSAGE}
-        )
-    return await call_next(request)
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Uygulama kapatma"""
+    logger.info("EzyagoTrading shutting down...")
+    
+    # Tüm aktif botları güvenli şekilde durdur
+    try:
+        from app.bot_manager import bot_manager
+        await bot_manager.shutdown_all_bots()
+        logger.info("All bots shutdown completed")
+    except Exception as e:
+        logger.error(f"Error during bot shutdown: {e}")
 
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "environment": settings.ENVIRONMENT,
-        "version": "1.0.0",
-        "maintenance_mode": settings.MAINTENANCE_MODE,
-        "demo_mode": settings.DEMO_MODE_ENABLED
-    }
+    """Health check endpoint"""
+    try:
+        from app.firebase_manager import firebase_manager
+        firebase_status = firebase_manager.is_initialized()
+        
+        return {
+            "status": "healthy" if firebase_status else "degraded",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "environment": settings.ENVIRONMENT,
+            "version": "1.0.0",
+            "maintenance_mode": settings.MAINTENANCE_MODE,
+            "demo_mode": settings.DEMO_MODE_ENABLED,
+            "firebase_connected": firebase_status
+        }
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
 
 # Firebase config endpoint for frontend
 @app.get("/api/firebase-config")
@@ -117,9 +180,18 @@ async def get_app_info():
         "order_size_range": {"min": settings.MIN_ORDER_SIZE_USDT, "max": settings.MAX_ORDER_SIZE_USDT}
     }
 
-# Static file routes
-from fastapi.responses import FileResponse
+# Metrics endpoint
+@app.get("/metrics")
+async def get_metrics():
+    """Prometheus metrics endpoint"""
+    try:
+        metrics_data = get_metrics_data()
+        return PlainTextResponse(content=metrics_data, media_type=get_metrics_content_type())
+    except Exception as e:
+        logger.error(f"Metrics error: {e}")
+        return PlainTextResponse("# Metrics not available")
 
+# Static file routes
 @app.get("/")
 async def read_root():
     return FileResponse("static/index.html")
@@ -140,31 +212,16 @@ async def read_dashboard():
 async def read_admin():
     return FileResponse("static/admin.html")
 
-# Metrics endpoint
-@app.get("/metrics")
-async def get_metrics():
-    """Prometheus metrics endpoint"""
-    try:
-        from app.utils.metrics import get_metrics_data, get_metrics_content_type
-        metrics_data = get_metrics_data()
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse(content=metrics_data, media_type=get_metrics_content_type())
-    except Exception as e:
-        logger.error(f"Metrics error: {e}")
-        return PlainTextResponse("# Metrics not available")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Uygulama kapatma"""
-    logger.info("EzyagoTrading shutting down...")
+# Catch-all route for SPA
+@app.get("/{full_path:path}")
+async def catch_all(full_path: str):
+    """Catch-all route for SPA routing"""
+    # Check if it's a static file request
+    if full_path.startswith("static/"):
+        raise HTTPException(status_code=404, detail="File not found")
     
-    # Tüm aktif botları güvenli şekilde durdur
-    try:
-        from app.bot_manager import bot_manager
-        await bot_manager.shutdown_all_bots()
-        logger.info("All bots shutdown completed")
-    except Exception as e:
-        logger.error(f"Error during bot shutdown: {e}")
+    # For other paths, serve index.html (SPA routing)
+    return FileResponse("static/index.html")
 
 if __name__ == "__main__":
     import uvicorn
