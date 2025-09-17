@@ -1,9 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer
-from pydantic import BaseModel, EmailStr
 from app.firebase_manager import firebase_manager
-from app.utils.validation import EnhancedApiKeysRequest
-from app.utils.crypto import encrypt_data, decrypt_data
+from app.utils.validation import LoginRequest, RegisterRequest
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 import logging
@@ -12,14 +10,14 @@ logger = logging.getLogger("auth_routes")
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 security = HTTPBearer()
 
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str
-    full_name: str
+async def get_current_user(token: str = Depends(security)):
+    """JWT token'dan kullanıcı bilgilerini al"""
+    try:
+        decoded_token = firebase_auth.verify_id_token(token.credentials)
+        return decoded_token
+    except Exception as e:
+        logger.error(f"Token verification failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 @router.post("/verify-token")
 async def verify_token(token: str = Depends(security)):
@@ -36,11 +34,10 @@ async def verify_token(token: str = Depends(security)):
         raise HTTPException(status_code=401, detail="Invalid token")
 
 @router.get("/user-info")
-async def get_user_info(token: str = Depends(security)):
+async def get_user_info(current_user: dict = Depends(get_current_user)):
     """Kullanıcı bilgilerini getir"""
     try:
-        decoded_token = firebase_auth.verify_id_token(token.credentials)
-        user_id = decoded_token['uid']
+        user_id = current_user['uid']
         
         user_data = firebase_manager.get_user_data(user_id)
         if not user_data:
@@ -54,11 +51,14 @@ async def get_user_info(token: str = Depends(security)):
             "subscription_expiry": user_data.get("subscription_expiry"),
             "api_keys_set": user_data.get("api_keys_set", False),
             "total_trades": user_data.get("total_trades", 0),
-            "total_pnl": user_data.get("total_pnl", 0.0)
+            "total_pnl": user_data.get("total_pnl", 0.0),
+            "role": user_data.get("role", "user")
         }
         
         return safe_user_data
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting user info: {e}")
         raise HTTPException(status_code=500, detail="Failed to get user info")
