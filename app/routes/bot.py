@@ -210,6 +210,33 @@ async def get_api_status(current_user: dict = Depends(get_current_user)):
         logger.error(f"API status check error: {e}")
         raise HTTPException(status_code=500, detail=f"API durumu kontrol edilemedi: {str(e)}")
 
+@router.get("/trading-pairs")
+async def get_trading_pairs(current_user: dict = Depends(get_current_user)):
+    """Desteklenen trading çiftlerini getir"""
+    try:
+        # Popüler trading çiftleri
+        pairs = [
+            {"symbol": "BTCUSDT", "baseAsset": "BTC", "quoteAsset": "USDT"},
+            {"symbol": "ETHUSDT", "baseAsset": "ETH", "quoteAsset": "USDT"},
+            {"symbol": "BNBUSDT", "baseAsset": "BNB", "quoteAsset": "USDT"},
+            {"symbol": "ADAUSDT", "baseAsset": "ADA", "quoteAsset": "USDT"},
+            {"symbol": "DOTUSDT", "baseAsset": "DOT", "quoteAsset": "USDT"},
+            {"symbol": "LINKUSDT", "baseAsset": "LINK", "quoteAsset": "USDT"},
+            {"symbol": "LTCUSDT", "baseAsset": "LTC", "quoteAsset": "USDT"},
+            {"symbol": "BCHUSDT", "baseAsset": "BCH", "quoteAsset": "USDT"},
+            {"symbol": "XRPUSDT", "baseAsset": "XRP", "quoteAsset": "USDT"},
+            {"symbol": "EOSUSDT", "baseAsset": "EOS", "quoteAsset": "USDT"}
+        ]
+        
+        return {
+            "success": True,
+            "pairs": pairs
+        }
+        
+    except Exception as e:
+        logger.error(f"Trading pairs fetch error: {e}")
+        raise HTTPException(status_code=500, detail="Trading çiftleri alınamadı")
+
 @router.get("/system-stats")
 async def get_system_stats(current_user: dict = Depends(get_current_user)):
     """Sistem istatistikleri (admin için)"""
