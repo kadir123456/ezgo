@@ -167,11 +167,11 @@ async def get_firebase_config():
         firebase_config = {
             "apiKey": settings.FIREBASE_WEB_API_KEY,
             "authDomain": settings.FIREBASE_WEB_AUTH_DOMAIN,
-            "databaseURL": settings.FIREBASE_DATABASE_URL,
             "projectId": settings.FIREBASE_WEB_PROJECT_ID,
             "storageBucket": settings.FIREBASE_WEB_STORAGE_BUCKET,
             "messagingSenderId": settings.FIREBASE_WEB_MESSAGING_SENDER_ID,
-            "appId": settings.FIREBASE_WEB_APP_ID
+            "appId": settings.FIREBASE_WEB_APP_ID,
+            "databaseURL": settings.FIREBASE_DATABASE_URL
         }
         
         # Check for missing fields
@@ -196,11 +196,12 @@ async def get_app_info():
     """Uygulama bilgileri"""
     return {
         "bot_price": settings.BOT_PRICE_USD,
+        "monthly_price": settings.BOT_PRICE_USD,  # Use BOT_PRICE_USD for consistency
         "trial_days": settings.TRIAL_PERIOD_DAYS,
-        "monthly_price": settings.MONTHLY_SUBSCRIPTION_PRICE,
         "demo_mode": settings.DEMO_MODE_ENABLED,
         "maintenance_mode": settings.MAINTENANCE_MODE,
         "payment_address": settings.PAYMENT_TRC20_ADDRESS,
+        "server_ips": settings.SERVER_IPS,
         "max_bots_per_user": settings.MAX_BOTS_PER_USER,
         "supported_timeframes": ["1m", "5m", "15m", "30m", "1h", "4h", "1d"],
         "leverage_range": {"min": settings.MIN_LEVERAGE, "max": settings.MAX_LEVERAGE},
