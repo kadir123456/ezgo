@@ -4,9 +4,11 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime, timezone
 from app.config import settings
-from app.utils.logger import get_logger
+import logging
 
-logger = get_logger("main")
+# Setup basic logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("main")
 
 # FastAPI uygulama başlatma - environment'a göre
 app = FastAPI(
@@ -47,10 +49,16 @@ async def startup_event():
     logger.info(f"Maintenance mode: {settings.MAINTENANCE_MODE}")
     
     # Ayarları doğrula
-    if not settings.validate_settings():
-        logger.warning("Some configuration issues detected")
+    try:
+        if not settings.validate_settings():
+            logger.warning("Some configuration issues detected")
+    except Exception as e:
+        logger.error(f"Settings validation error: {e}")
     
-    settings.print_settings()
+    try:
+        settings.print_settings()
+    except Exception as e:
+        logger.error(f"Settings print error: {e}")
 
 # Maintenance mode middleware
 @app.middleware("http")
