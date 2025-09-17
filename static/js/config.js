@@ -15,10 +15,12 @@ class ConfigLoader {
         }
 
         try {
+            console.log('🔄 Loading Firebase config from backend environment variables...');
+            
             // Firebase config'i backend'den al
             const firebaseResponse = await fetch('/api/firebase-config');
             if (!firebaseResponse.ok) {
-                throw new Error(`Firebase config HTTP ${firebaseResponse.status}`);
+                throw new Error(`Firebase config HTTP ${firebaseResponse.status}: ${firebaseResponse.statusText}`);
             }
             this.firebaseConfig = await firebaseResponse.json();
             
@@ -30,18 +32,21 @@ class ConfigLoader {
                 throw new Error(`Missing Firebase config fields: ${missingFields.join(', ')}`);
             }
 
+            console.log('✅ Firebase config loaded from environment variables');
+            console.log('📋 Project ID:', this.firebaseConfig.projectId);
+
             // App info'yu backend'den al
             const appResponse = await fetch('/api/app-info');
             if (!appResponse.ok) {
-                throw new Error(`App info HTTP ${appResponse.status}`);
+                throw new Error(`App info HTTP ${appResponse.status}: ${appResponse.statusText}`);
             }
             this.appInfo = await appResponse.json();
 
+            console.log('✅ App info loaded from environment variables');
+            console.log('💰 Bot Price:', this.appInfo.bot_price);
+            console.log('💳 Payment Address:', this.appInfo.payment_address);
+
             this.isLoaded = true;
-            
-            console.log('✅ Configurations loaded from backend environment variables');
-            console.log('Firebase Project ID:', this.firebaseConfig.projectId);
-            console.log('Payment Address:', this.appInfo.payment_address);
             
             return {
                 firebase: this.firebaseConfig,
@@ -51,10 +56,11 @@ class ConfigLoader {
         } catch (error) {
             console.error('❌ Failed to load configurations from backend:', error);
             
-            // Hata durumunda kullanıcıya bilgi ver
-            alert(`Konfigürasyon yüklenemedi: ${error.message}\n\nLütfen sayfayı yenileyin veya destek ile iletişime geçin.`);
+            // Kullanıcıya net hata mesajı
+            const errorMessage = `Konfigürasyon yüklenemedi: ${error.message}\n\nMuhtemel nedenler:\n- Environment variables eksik\n- Backend bağlantı sorunu\n- Firebase ayarları hatalı\n\nLütfen sayfayı yenileyin veya destek ile iletişime geçin.`;
+            alert(errorMessage);
             
-            // Fallback config KALDIRILDI - sadece backend'den alınacak
+            // Hardcoded fallback KALDIRILDI - sadece backend'den alınacak
             throw error;
         }
     }
@@ -122,7 +128,7 @@ window.getAppInfo = async function() {
 // Initialize configurations on page load
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        console.log('🔄 Loading configurations from environment variables...');
+        console.log('🔄 Loading configurations from backend environment variables...');
         await window.configLoader.loadConfigurations();
         console.log('✅ All configurations loaded successfully from backend');
         
@@ -147,11 +153,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             z-index: 10000;
             font-family: Inter, sans-serif;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            max-width: 90%;
+            text-align: center;
         `;
         errorDiv.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; justify-content: center;">
                 <i class="fas fa-exclamation-triangle"></i>
-                <span>Sistem yapılandırması yüklenemedi. Lütfen sayfayı yenileyin.</span>
+                <span>Sistem yapılandırması yüklenemedi. Sayfa 5 saniye sonra yenilenecek.</span>
             </div>
         `;
         document.body.appendChild(errorDiv);
