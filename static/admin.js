@@ -487,52 +487,89 @@ async function approvePayment(paymentId) {
         showToast('Ödeme onaylanıyor...', 'info');
         
         const paymentRef = database.ref(`payment_notifications/${paymentId}`);
-        const paymentSnapshot = await paymentRef.once('value');
-        const paymentData = paymentSnapshot.val();
+        
+        let paymentData = null;
+        try {
+            const paymentSnapshot = await paymentRef.once('value');
+            paymentData = paymentSnapshot.val();
+        } catch (readError) {
+            console.error('Could not read payment data:', readError);
+            throw new Error('Ödeme verisi okunamadı');
+        }
         
         if (!paymentData) {
             throw new Error('Ödeme verisi bulunamadı');
         }
         
         // First approve the payment
-        await paymentRef.update({
-            status: 'approved',
-            approved_at: firebase.database.ServerValue.TIMESTAMP,
-            approved_by: currentUser.email
-        });
+        try {
+            await paymentRef.update({
+                status: 'approved',
+                approved_at: firebase.database.ServerValue.TIMESTAMP,
+                approved_by: currentUser.email
+            });
+        } catch (updateError) {
+            console.warn('Payment update failed, trying set:', updateError);
+            const updatedPayment = {
+                ...paymentData,
+                status: 'approved',
+                approved_at: firebase.database.ServerValue.TIMESTAMP,
+                approved_by: currentUser.email
+            };
+            await paymentRef.set(updatedPayment);
+        }
         
         // Then extend user subscription by 30 days
         if (paymentData.user_id) {
             const userRef = database.ref(`users/${paymentData.user_id}`);
-            const userSnapshot = await userRef.once('value');
-            const userData = userSnapshot.val();
             
-            if (userData) {
-                const now = new Date();
-                let baseDate;
-                
-                if (userData.subscription_expiry) {
-                    const currentExpiry = new Date(userData.subscription_expiry);
-                    baseDate = currentExpiry > now ? currentExpiry : now;
-                } else {
-                    baseDate = now;
-                }
-                
-                const newExpiryDate = new Date(baseDate.getTime() + (30 * 24 * 60 * 60 * 1000));
-                
-                await userRef.update({
-                    subscription_expiry: newExpiryDate.toISOString(),
-                    subscription_status: 'active',
-                    payment_approved_by: currentUser.email,
-                    payment_approved_at: firebase.database.ServerValue.TIMESTAMP,
-                    payment_approved_days: 30,
-                    last_updated: firebase.database.ServerValue.TIMESTAMP
-                });
-                
-                showToast(`✅ Ödeme onaylandı ve ${userData.email} kullanıcısının aboneliği 30 gün uzatıldı!`, 'success');
-            } else {
-                showToast('⚠️ Ödeme onaylandı ancak kullanıcı bulunamadı', 'warning');
+            let userData = null;
+            try {
+                const userSnapshot = await userRef.once('value');
+                userData = userSnapshot.val();
+            } catch (readError) {
+                console.warn('Could not read user data for payment approval:', readError);
             }
+            
+            if (!userData) {
+                // Create minimal user data
+                userData = {
+                    email: paymentData.user_email,
+                    subscription_status: 'trial',
+                    created_at: firebase.database.ServerValue.TIMESTAMP
+                };
+            }
+            
+            const now = new Date();
+            let baseDate;
+            
+            if (userData.subscription_expiry) {
+                const currentExpiry = new Date(userData.subscription_expiry);
+                baseDate = currentExpiry > now ? currentExpiry : now;
+            } else {
+                baseDate = now;
+            }
+            
+            const newExpiryDate = new Date(baseDate.getTime() + (30 * 24 * 60 * 60 * 1000));
+            
+            const userUpdateData = {
+                subscription_expiry: newExpiryDate.toISOString(),
+                subscription_status: 'active',
+                payment_approved_by: currentUser.email,
+                payment_approved_at: firebase.database.ServerValue.TIMESTAMP,
+                payment_approved_days: 30,
+                last_updated: firebase.database.ServerValue.TIMESTAMP
+            };
+            
+            try {
+                await userRef.update(userUpdateData);
+            } catch (updateError) {
+                console.warn('User update failed, trying set:', updateError);
+                const mergedUserData = { ...userData, ...userUpdateData };
+                await userRef.set(mergedUserData);
+            }
+            
+            showToast(`✅ Ödeme onaylandı ve ${paymentData.user_email} kullanıcısının aboneliği 30 gün uzatıldı!`, 'success');
         } else {
             showToast('✅ Ödeme onaylandı!', 'success');
         }
