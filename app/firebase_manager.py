@@ -29,13 +29,17 @@ class FirebaseManager:
                 if cred_json_str.startswith('"') and cred_json_str.endswith('"'):
                     cred_json_str = cred_json_str[1:-1]  # Remove outer quotes
                 
-                # Escape karakterleri düzelt - daha güvenli yöntem
+                # Production için güvenli JSON parsing
                 import codecs
-                cred_json_str = codecs.decode(cred_json_str, 'unicode_escape')
-                
-                # Control karakterleri temizle
                 import re
-                # Sadece problematik control karakterleri temizle, \n ve \t koru
+                
+                # Unicode escape karakterlerini decode et
+                try:
+                    cred_json_str = codecs.decode(cred_json_str, 'unicode_escape')
+                except Exception as decode_error:
+                    logger.warning(f"Unicode decode failed, trying raw: {decode_error}")
+                
+                # Control karakterleri temizle (newline hariç)
                 cred_json_str = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', cred_json_str)
                 
                 cred_dict = json.loads(cred_json_str)
