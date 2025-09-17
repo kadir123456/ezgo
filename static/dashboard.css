@@ -488,6 +488,10 @@ body {
     margin-top: 1.5rem;
 }
 
+.control-buttons.hidden {
+    display: none;
+}
+
 /* Account Statistics */
 .account-stats {
     display: grid;
