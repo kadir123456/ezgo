@@ -1,14 +1,15 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer
 from app.firebase_manager import firebase_manager
+from app.utils.logger import get_logger
 from app.utils.crypto import decrypt_data
 from pydantic import BaseModel
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 from datetime import datetime, timezone
-import logging
+import random
 
-logger = logging.getLogger("user_routes")
+logger = get_logger("user_routes")
 router = APIRouter(prefix="/api/user", tags=["user"])
 security = HTTPBearer()
 
@@ -220,3 +221,54 @@ async def get_api_info(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"API info fetch error: {e}")
         raise HTTPException(status_code=500, detail="API bilgileri alınamadı")
+
+@router.post("/close-position")
+async def close_position(
+    request: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """Pozisyon kapatma (simulated)"""
+    try:
+        user_id = current_user['uid']
+        symbol = request.get('symbol')
+        position_side = request.get('positionSide')
+        
+        if not symbol or not position_side:
+            raise HTTPException(status_code=400, detail="Symbol ve position side gerekli")
+        
+        # Simulated position close - gerçek uygulamada Binance API kullanılacak
+        trade_data = {
+            "user_id": user_id,
+            "symbol": symbol,
+            "side": position_side,
+            "status": "CLOSED_MANUAL",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "pnl": round((random.random() * 40 - 20), 2)  # Random PnL for demo
+        }
+        
+        # Log trade to Firebase
+        firebase_manager.log_trade(trade_data)
+        
+        # Update user stats
+        user_data = firebase_manager.get_user_data(user_id)
+        if user_data:
+            current_trades = user_data.get('total_trades', 0)
+            current_pnl = user_data.get('total_pnl', 0.0)
+            
+            firebase_manager.update_user_data(user_id, {
+                'total_trades': current_trades + 1,
+                'total_pnl': current_pnl + trade_data['pnl'],
+                'last_trade_time': firebase_manager.get_server_timestamp()
+            })
+        
+        return {
+            "success": True,
+            "message": "Pozisyon başarıyla kapatıldı",
+            "pnl": trade_data['pnl']
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Position close error: {e}")
+        raise HTTPException(status_code=500, detail="Pozisyon kapatılamadı")
