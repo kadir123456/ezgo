@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
-from typing import Dict, Any
-import json
+import logging
+
+logger = logging.getLogger("metrics")
 
 class MetricsCollector:
-    """Basit metrics kolektörü"""
+    """Simple metrics collector"""
     
     def __init__(self):
         self.data = {
@@ -14,6 +15,7 @@ class MetricsCollector:
             "errors": 0,
             "websocket_connections": 0,
             "websocket_reconnections": 0,
+            "active_bots": 0,
             "last_update": datetime.now(timezone.utc).isoformat()
         }
         
@@ -21,26 +23,33 @@ class MetricsCollector:
         """API isteği kaydeder"""
         self.data["api_requests"] += 1
         self.data["last_update"] = datetime.now(timezone.utc).isoformat()
+        logger.info(f"API request: {method} {endpoint} - {status_code}")
         
     def record_bot_start(self, user_id: str, symbol: str):
         """Bot başlatma kaydeder"""
         self.data["bot_starts"] += 1
+        self.data["active_bots"] += 1
         self.data["last_update"] = datetime.now(timezone.utc).isoformat()
+        logger.info(f"Bot started: {user_id} - {symbol}")
         
     def record_bot_stop(self, user_id: str, symbol: str, reason: str):
         """Bot durdurma kaydeder"""
         self.data["bot_stops"] += 1
+        self.data["active_bots"] = max(0, self.data["active_bots"] - 1)
         self.data["last_update"] = datetime.now(timezone.utc).isoformat()
+        logger.info(f"Bot stopped: {user_id} - {symbol} - {reason}")
         
     def record_trade(self, user_id: str, symbol: str, side: str, pnl: float, reason: str):
         """Trade kaydeder"""
         self.data["trades"] += 1
         self.data["last_update"] = datetime.now(timezone.utc).isoformat()
+        logger.info(f"Trade: {user_id} - {symbol} - {side} - PnL: {pnl}")
         
     def record_error(self, error_type: str, component: str):
         """Hata kaydeder"""
         self.data["errors"] += 1
         self.data["last_update"] = datetime.now(timezone.utc).isoformat()
+        logger.error(f"Error recorded: {error_type} in {component}")
         
     def update_websocket_connections(self, count: int):
         """WebSocket bağlantı sayısını günceller"""
@@ -51,10 +60,7 @@ class MetricsCollector:
         """WebSocket yeniden bağlanma kaydeder"""
         self.data["websocket_reconnections"] += 1
         self.data["last_update"] = datetime.now(timezone.utc).isoformat()
-        
-    def record_binance_error(self, error_code: str):
-        """Binance API hatası kaydeder"""
-        self.record_error(f"binance_{error_code}", "binance_client")
+        logger.info(f"WebSocket reconnection: {user_id}")
 
 # Global metrics instance
 metrics = MetricsCollector()
@@ -62,8 +68,7 @@ metrics = MetricsCollector()
 def get_metrics_data() -> str:
     """Metrics verilerini Prometheus formatında döndürür"""
     data = metrics.data
-    prometheus_format = f"""
-# HELP api_requests_total Total API requests
+    prometheus_format = f"""# HELP api_requests_total Total API requests
 # TYPE api_requests_total counter
 api_requests_total {data['api_requests']}
 
@@ -74,6 +79,10 @@ bot_starts_total {data['bot_starts']}
 # HELP bot_stops_total Total bot stops
 # TYPE bot_stops_total counter
 bot_stops_total {data['bot_stops']}
+
+# HELP active_bots Current active bots
+# TYPE active_bots gauge
+active_bots {data['active_bots']}
 
 # HELP trades_total Total trades
 # TYPE trades_total counter
