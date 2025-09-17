@@ -3,16 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EzyagoTrading - Admin Panel</title>
-    <meta name="description" content="EzyagoTrading admin panel for user management and subscription control">
-    <meta name="robots" content="noindex, nofollow">
+    <title>Admin Panel - EzyagoTrading</title>
+    <meta name="description" content="EzyagoTrading Admin Panel">
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     
-    <!-- Admin Panel CSS -->
     <link rel="stylesheet" href="/static/admin.css">
 </head>
 <body>
@@ -21,10 +19,10 @@
         <div class="loading-content">
             <div class="loading-logo">
                 <i class="fas fa-shield-alt"></i>
-                <span>EzyagoTrading Admin</span>
+                <span>Admin Panel</span>
             </div>
             <div class="loading-spinner"></div>
-            <p>Admin panel yükleniyor...</p>
+            <p>Admin paneli yükleniyor...</p>
         </div>
     </div>
 
@@ -37,16 +35,17 @@
                     <div class="admin-logo">
                         <i class="fas fa-shield-alt"></i>
                         <div>
-                            <h1>EzyagoTrading Admin</h1>
-                            <p>Kullanıcı Yönetimi & Sistem Kontrolü</p>
+                            <h1>EzyagoTrading</h1>
+                            <p>Admin Panel</p>
                         </div>
                     </div>
+                    
                     <div class="admin-actions">
-                        <button id="refresh-all-btn" class="btn btn-outline btn-sm">
-                            <i class="fas fa-sync"></i>
-                            Tümünü Yenile
+                        <button class="btn btn-primary btn-sm" id="refresh-all-btn">
+                            <i class="fas fa-sync-alt"></i>
+                            Yenile
                         </button>
-                        <button id="admin-logout-button" class="btn btn-outline btn-sm">
+                        <button class="btn btn-danger btn-sm" id="admin-logout-button">
                             <i class="fas fa-sign-out-alt"></i>
                             Çıkış
                         </button>
@@ -55,36 +54,11 @@
             </div>
         </header>
 
-        <!-- Navigation Tabs -->
-        <div class="admin-nav">
-            <div class="container">
-                <div class="nav-tabs">
-                    <button class="nav-tab active" data-tab="users">
-                        <i class="fas fa-users"></i>
-                        Kullanıcılar
-                    </button>
-                    <button class="nav-tab" data-tab="payments">
-                        <i class="fas fa-credit-card"></i>
-                        Ödeme Bildirimleri
-                    </button>
-                    <button class="nav-tab" data-tab="support">
-                        <i class="fas fa-life-ring"></i>
-                        Destek Mesajları
-                    </button>
-                    <button class="nav-tab" data-tab="system">
-                        <i class="fas fa-server"></i>
-                        Sistem
-                    </button>
-                </div>
-            </div>
-        </div>
-
         <!-- Main Content -->
         <main class="admin-main">
             <div class="container">
-                <!-- Users Tab -->
-                <div id="users-tab" class="tab-content active">
-                    <!-- Stats Overview -->
+                <div class="admin-content">
+                    <!-- Statistics -->
                     <div class="admin-stats">
                         <div class="stat-card">
                             <div class="stat-icon primary">
@@ -95,27 +69,30 @@
                                 <div class="stat-label">Toplam Kullanıcı</div>
                             </div>
                         </div>
+
                         <div class="stat-card">
                             <div class="stat-icon success">
-                                <i class="fas fa-user-check"></i>
+                                <i class="fas fa-check-circle"></i>
                             </div>
                             <div class="stat-info">
                                 <div class="stat-value" id="active-users-count">0</div>
-                                <div class="stat-label">Aktif Abonelikler</div>
+                                <div class="stat-label">Aktif Abonelik</div>
                             </div>
                         </div>
+
                         <div class="stat-card">
                             <div class="stat-icon warning">
                                 <i class="fas fa-clock"></i>
                             </div>
                             <div class="stat-info">
                                 <div class="stat-value" id="trial-users-count">0</div>
-                                <div class="stat-label">Deneme Kullanıcıları</div>
+                                <div class="stat-label">Deneme Kullanıcısı</div>
                             </div>
                         </div>
+
                         <div class="stat-card">
                             <div class="stat-icon danger">
-                                <i class="fas fa-user-times"></i>
+                                <i class="fas fa-times-circle"></i>
                             </div>
                             <div class="stat-info">
                                 <div class="stat-value" id="expired-users-count">0</div>
@@ -124,167 +101,89 @@
                         </div>
                     </div>
 
-                    <!-- Users Management -->
+                    <!-- Navigation Tabs -->
                     <div class="admin-section">
                         <div class="section-header">
-                            <h2>
-                                <i class="fas fa-users-cog"></i>
-                                Kullanıcı Yönetimi
-                            </h2>
-                            <div class="section-actions">
-                                <button class="btn btn-primary btn-sm" onclick="loadUsers()">
-                                    <i class="fas fa-sync"></i>
-                                    Yenile
+                            <div style="display: flex; gap: 1rem;">
+                                <button class="btn btn-primary nav-tab active" data-tab="users">
+                                    <i class="fas fa-users"></i>
+                                    Kullanıcılar
+                                </button>
+                                <button class="btn btn-outline nav-tab" data-tab="payments">
+                                    <i class="fas fa-credit-card"></i>
+                                    Ödemeler
+                                </button>
+                                <button class="btn btn-outline nav-tab" data-tab="support">
+                                    <i class="fas fa-life-ring"></i>
+                                    Destek
                                 </button>
                             </div>
                         </div>
 
-                        <div class="table-container">
-                            <div class="table-responsive">
-                                <table class="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th><i class="fas fa-envelope"></i> Email</th>
-                                            <th><i class="fas fa-crown"></i> Durum</th>
-                                            <th><i class="fas fa-calendar"></i> Bitiş Tarihi</th>
-                                            <th><i class="fas fa-user"></i> Kullanıcı ID</th>
-                                            <th class="text-center"><i class="fas fa-cogs"></i> İşlemler</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="users-table-body">
-                                        <tr>
-                                            <td colspan="5" class="text-center loading-message">
-                                                <i class="fas fa-spinner fa-spin"></i>
-                                                Kullanıcılar yükleniyor...
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Payments Tab -->
-                <div id="payments-tab" class="tab-content">
-                    <div class="admin-section">
-                        <div class="section-header">
-                            <h2>
-                                <i class="fas fa-credit-card"></i>
-                                Ödeme Bildirimleri
-                            </h2>
-                            <div class="section-actions">
-                                <button class="btn btn-primary btn-sm" onclick="loadPayments()">
-                                    <i class="fas fa-sync"></i>
-                                    Yenile
-                                </button>
-                            </div>
-                        </div>
-
-                        <div class="table-container">
-                            <div class="table-responsive">
-                                <table class="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th><i class="fas fa-user"></i> Kullanıcı</th>
-                                            <th><i class="fas fa-dollar-sign"></i> Miktar</th>
-                                            <th><i class="fas fa-receipt"></i> TX Hash</th>
-                                            <th><i class="fas fa-calendar"></i> Tarih</th>
-                                            <th><i class="fas fa-flag"></i> Durum</th>
-                                            <th class="text-center"><i class="fas fa-cogs"></i> İşlemler</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="payments-table-body">
-                                        <tr>
-                                            <td colspan="6" class="text-center loading-message">
-                                                <i class="fas fa-spinner fa-spin"></i>
-                                                Ödeme bildirimleri yükleniyor...
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Support Tab -->
-                <div id="support-tab" class="tab-content">
-                    <div class="admin-section">
-                        <div class="section-header">
-                            <h2>
-                                <i class="fas fa-life-ring"></i>
-                                Destek Mesajları
-                            </h2>
-                            <div class="section-actions">
-                                <button class="btn btn-primary btn-sm" onclick="loadSupportMessages()">
-                                    <i class="fas fa-sync"></i>
-                                    Yenile
-                                </button>
-                            </div>
-                        </div>
-
-                        <div class="support-messages" id="support-messages-container">
-                            <!-- Support messages will be loaded here -->
-                        </div>
-                    </div>
-                </div>
-
-                <!-- System Tab -->
-                <div id="system-tab" class="tab-content">
-                    <div class="admin-section">
-                        <div class="section-header">
-                            <h2>
-                                <i class="fas fa-server"></i>
-                                Sistem Durumu
-                            </h2>
-                        </div>
-                        
-                        <div class="system-info">
-                            <div class="info-grid">
-                                <div class="info-card">
-                                    <h3><i class="fas fa-database"></i> Firebase Durumu</h3>
-                                    <div class="status-indicator" id="firebase-status">
-                                        <span class="status-dot"></span>
-                                        <span>Kontrol ediliyor...</span>
-                                    </div>
-                                </div>
-                                <div class="info-card">
-                                    <h3><i class="fas fa-chart-line"></i> Trading Bot</h3>
-                                    <div class="status-indicator" id="bot-status">
-                                        <span class="status-dot"></span>
-                                        <span>EMA(9,21) Aktif</span>
-                                    </div>
-                                </div>
-                                <div class="info-card">
-                                    <h3><i class="fas fa-shield-alt"></i> Güvenlik</h3>
-                                    <div class="status-indicator active">
-                                        <span class="status-dot"></span>
-                                        <span>AES-256 Şifreleme</span>
-                                    </div>
-                                </div>
-                                <div class="info-card">
-                                    <h3><i class="fas fa-tachometer-alt"></i> Performans</h3>
-                                    <div class="status-indicator active">
-                                        <span class="status-dot"></span>
-                                        <span>~0.001s Response</span>
-                                    </div>
+                        <!-- Users Tab -->
+                        <div id="users-tab" class="tab-content active">
+                            <div class="table-container">
+                                <div class="table-responsive">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Kullanıcı</th>
+                                                <th>Abonelik</th>
+                                                <th>Bitiş Tarihi</th>
+                                                <th>User ID</th>
+                                                <th>İşlemler</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="users-table-body">
+                                            <tr>
+                                                <td colspan="5" class="text-center loading-message">
+                                                    <i class="fas fa-spinner fa-spin"></i>
+                                                    Kullanıcılar yükleniyor...
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                </div>
 
-                <!-- Status Messages -->
-                <div id="status-messages">
-                    <div id="error-message" class="status-message error hidden">
-                        <i class="fas fa-exclamation-triangle"></i>
-                        <span id="error-text"></span>
-                    </div>
+                        <!-- Payments Tab -->
+                        <div id="payments-tab" class="tab-content">
+                            <div class="table-container">
+                                <div class="table-responsive">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Kullanıcı</th>
+                                                <th>Tutar</th>
+                                                <th>İşlem Hash</th>
+                                                <th>Tarih</th>
+                                                <th>Durum</th>
+                                                <th>İşlemler</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="payments-table-body">
+                                            <tr>
+                                                <td colspan="6" class="text-center loading-message">
+                                                    <i class="fas fa-spinner fa-spin"></i>
+                                                    Ödeme bildirimleri yükleniyor...
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
 
-                    <div id="success-message" class="status-message success hidden">
-                        <i class="fas fa-check-circle"></i>
-                        <span id="success-text"></span>
+                        <!-- Support Tab -->
+                        <div id="support-tab" class="tab-content">
+                            <div id="support-messages-container">
+                                <div class="text-center loading-message">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    Destek mesajları yükleniyor...
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -294,10 +193,12 @@
         <footer class="admin-footer">
             <div class="container">
                 <div class="admin-footer-content">
-                    <p>&copy; <span id="current-year">2025</span> EzyagoTrading. Admin Panel v3.0</p>
                     <div class="footer-warning">
-                        <i class="fas fa-shield-alt"></i>
-                        Yetkili Personel - Gizli Sistem
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span>Admin paneli - Dikkatli kullanın</span>
+                    </div>
+                    <div>
+                        <span>&copy; <span id="current-year">2025</span> EzyagoTrading Admin Panel</span>
                     </div>
                 </div>
             </div>
@@ -308,917 +209,8 @@
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-    
+
     <!-- Admin JavaScript -->
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            console.log('Complete Admin Panel Loading...');
-            
-            // Global variables
-            let firebaseApp = null;
-            let auth = null;
-            let database = null;
-            let currentUser = null;
-
-            // DOM Elements
-            const elements = {
-                loadingScreen: document.getElementById('loading-screen'),
-                adminContainer: document.getElementById('admin-container'),
-                // Stats
-                totalUsersCount: document.getElementById('total-users-count'),
-                activeUsersCount: document.getElementById('active-users-count'),
-                trialUsersCount: document.getElementById('trial-users-count'),
-                expiredUsersCount: document.getElementById('expired-users-count'),
-                // Tables
-                usersTableBody: document.getElementById('users-table-body'),
-                paymentsTableBody: document.getElementById('payments-table-body'),
-                supportMessagesContainer: document.getElementById('support-messages-container'),
-                // Messages
-                errorMessage: document.getElementById('error-message'),
-                successMessage: document.getElementById('success-message'),
-                errorText: document.getElementById('error-text'),
-                successText: document.getElementById('success-text'),
-                // Buttons
-                adminLogoutButton: document.getElementById('admin-logout-button'),
-                refreshAllBtn: document.getElementById('refresh-all-btn'),
-                currentYear: document.getElementById('current-year')
-            };
-
-            // Initialize Firebase
-            async function initializeFirebase() {
-                try {
-                    const response = await fetch('/api/firebase-config');
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                    
-                    const firebaseConfig = await response.json();
-                    firebaseApp = firebase.initializeApp(firebaseConfig);
-                    auth = firebase.auth();
-                    database = firebase.database();
-                    
-                    console.log('Firebase initialized successfully');
-                    document.getElementById('firebase-status').innerHTML = `
-                        <span class="status-dot active"></span>
-                        <span>Bağlı</span>
-                    `;
-                    document.getElementById('firebase-status').className = 'status-indicator active';
-                    
-                    return true;
-                } catch (error) {
-                    console.error('Firebase initialization failed:', error);
-                    document.getElementById('firebase-status').innerHTML = `
-                        <span class="status-dot error"></span>
-                        <span>Bağlantı Hatası</span>
-                    `;
-                    document.getElementById('firebase-status').className = 'status-indicator error';
-                    return false;
-                }
-            }
-
-            // Authentication - Check for admin role
-            async function checkAuth() {
-                return new Promise((resolve) => {
-                    auth.onAuthStateChanged(async (user) => {
-                        if (user) {
-                            try {
-                                const idTokenResult = await user.getIdTokenResult(true);
-                                if (idTokenResult.claims.admin === true) {
-                                    currentUser = user;
-                                    console.log('Admin authenticated:', user.email);
-                                    resolve(true);
-                                } else {
-                                    showError('Admin yetkisi bulunamadı. Dashboard\'dan admin erişimi alın.');
-                                    setTimeout(() => window.location.href = '/dashboard.html', 3000);
-                                    resolve(false);
-                                }
-                            } catch (error) {
-                                console.error('Admin verification failed:', error);
-                                showError('Yetki kontrolü başarısız.');
-                                resolve(false);
-                            }
-                        } else {
-                            showError('Giriş yapılmamış. Yönlendiriliyor...');
-                            setTimeout(() => window.location.href = '/login.html', 2000);
-                            resolve(false);
-                        }
-                    });
-                });
-            }
-
-            // Load real users from Firebase
-            async function loadUsers() {
-                try {
-                    setLoadingState('users');
-                    const usersRef = database.ref('users');
-                    const snapshot = await usersRef.once('value');
-                    const usersData = snapshot.val();
-
-                    if (!usersData) {
-                        elements.usersTableBody.innerHTML = `
-                            <tr><td colspan="5" class="text-center text-muted">Henüz kullanıcı kaydı yok.</td></tr>
-                        `;
-                        updateStats({ total: 0, active: 0, trial: 0, expired: 0 });
-                        return;
-                    }
-
-                    const users = Object.entries(usersData);
-                    renderUsers(users);
-                    showSuccess(`${users.length} kullanıcı yüklendi`);
-                } catch (error) {
-                    console.error('Error loading users:', error);
-                    showError('Kullanıcılar yüklenirken hata: ' + error.message);
-                }
-            }
-
-            // Load payment notifications
-            async function loadPayments() {
-                try {
-                    setLoadingState('payments');
-                    const paymentsRef = database.ref('payment_notifications');
-                    const snapshot = await paymentsRef.once('value');
-                    const paymentsData = snapshot.val();
-
-                    if (!paymentsData) {
-                        elements.paymentsTableBody.innerHTML = `
-                            <tr><td colspan="6" class="text-center text-muted">Ödeme bildirimi yok.</td></tr>
-                        `;
-                        return;
-                    }
-
-                    const payments = Object.entries(paymentsData);
-                    renderPayments(payments);
-                    showSuccess(`${payments.length} ödeme bildirimi yüklendi`);
-                } catch (error) {
-                    console.error('Error loading payments:', error);
-                    showError('Ödeme bildirimleri yüklenirken hata: ' + error.message);
-                }
-            }
-
-            // Load support messages
-            async function loadSupportMessages() {
-                try {
-                    const supportRef = database.ref('support_messages');
-                    const snapshot = await supportRef.once('value');
-                    const supportData = snapshot.val();
-
-                    if (!supportData) {
-                        elements.supportMessagesContainer.innerHTML = `
-                            <div class="empty-state">
-                                <i class="fas fa-comments"></i>
-                                <h3>Destek mesajı yok</h3>
-                                <p>Henüz destek talebi gelmemiş</p>
-                            </div>
-                        `;
-                        return;
-                    }
-
-                    const messages = Object.entries(supportData);
-                    renderSupportMessages(messages);
-                    showSuccess(`${messages.length} destek mesajı yüklendi`);
-                } catch (error) {
-                    console.error('Error loading support messages:', error);
-                    showError('Destek mesajları yüklenirken hata: ' + error.message);
-                }
-            }
-
-            // Render functions
-            function renderUsers(users) {
-                const stats = { total: 0, active: 0, trial: 0, expired: 0 };
-                
-                const tableRows = users.map(([userId, userData]) => {
-                    stats.total++;
-                    const subscriptionStatus = getSubscriptionStatus(userData);
-                    const expiryInfo = getExpiryInfo(userData);
-                    
-                    if (subscriptionStatus.status === 'active') stats.active++;
-                    else if (subscriptionStatus.status === 'trial') stats.trial++;
-                    else stats.expired++;
-
-                    return `
-                        <tr class="user-row">
-                            <td>
-                                <div class="user-info">
-                                    <div class="email-text">${userData.email || 'Bilinmiyor'}</div>
-                                    <div class="join-date">Katıldı: ${formatDate(userData.created_at)}</div>
-                                    ${userData.full_name ? `<div class="user-language">${userData.full_name}</div>` : ''}
-                                </div>
-                            </td>
-                            <td>
-                                <span class="status-badge ${subscriptionStatus.status}">
-                                    <i class="fas ${subscriptionStatus.icon}"></i>
-                                    ${subscriptionStatus.label}
-                                </span>
-                            </td>
-                            <td>
-                                <div class="expiry-info">
-                                    <div class="expiry-date">${expiryInfo.date}</div>
-                                    ${expiryInfo.remaining ? `<div class="days-remaining ${expiryInfo.class}">${expiryInfo.remaining}</div>` : ''}
-                                </div>
-                            </td>
-                            <td>
-                                <span class="user-id-text" onclick="copyToClipboard('${userId}')" title="Kopyalamak için tıklayın">
-                                    ${userId.substring(0, 12)}...
-                                </span>
-                            </td>
-                            <td class="actions-cell">
-                                <div class="action-buttons">
-                                    <button class="btn btn-success btn-sm" onclick="extendSubscription('${userId}', '${escapeHtml(userData.email)}')" title="30 gün ekle">
-                                        <i class="fas fa-plus"></i>
-                                        <span class="btn-text">30 Gün</span>
-                                    </button>
-                                    <button class="btn btn-outline btn-sm" onclick="viewUserDetails('${userId}')" title="Detayları göster">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
-
-                elements.usersTableBody.innerHTML = tableRows;
-                updateStats(stats);
-            }
-
-            function renderPayments(payments) {
-                const tableRows = payments.map(([paymentId, paymentData]) => {
-                    const statusClass = paymentData.status === 'pending' ? 'warning' : 
-                                      paymentData.status === 'approved' ? 'success' : 'danger';
-                    
-                    return `
-                        <tr class="payment-row">
-                            <td>
-                                <div class="user-info">
-                                    <div class="email-text">${paymentData.user_email || 'Bilinmiyor'}</div>
-                                    <div class="join-date">${paymentData.user_id ? paymentData.user_id.substring(0, 12) + '...' : ''}</div>
-                                </div>
-                            </td>
-                            <td>$${paymentData.amount || '15'}</td>
-                            <td>
-                                <span class="user-id-text" onclick="copyToClipboard('${paymentData.transaction_hash}')" title="Hash kopyala">
-                                    ${paymentData.transaction_hash ? paymentData.transaction_hash.substring(0, 16) + '...' : 'N/A'}
-                                </span>
-                            </td>
-                            <td>${formatDate(paymentData.created_at)}</td>
-                            <td>
-                                <span class="status-badge ${statusClass}">
-                                    <i class="fas fa-${paymentData.status === 'pending' ? 'clock' : paymentData.status === 'approved' ? 'check' : 'times'}"></i>
-                                    ${paymentData.status === 'pending' ? 'Bekliyor' : paymentData.status === 'approved' ? 'Onaylandı' : 'Reddedildi'}
-                                </span>
-                            </td>
-                            <td class="actions-cell">
-                                <div class="action-buttons">
-                                    ${paymentData.status === 'pending' ? `
-                                        <button class="btn btn-success btn-sm" onclick="approvePayment('${paymentId}')" title="Onayla">
-                                            <i class="fas fa-check"></i>
-                                        </button>
-                                        <button class="btn btn-danger btn-sm" onclick="rejectPayment('${paymentId}')" title="Reddet">
-                                            <i class="fas fa-times"></i>
-                                        </button>
-                                    ` : `
-                                        <button class="btn btn-outline btn-sm" onclick="viewPaymentDetails('${paymentId}')" title="Detaylar">
-                                            <i class="fas fa-eye"></i>
-                                        </button>
-                                    `}
-                                </div>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
-
-                elements.paymentsTableBody.innerHTML = tableRows;
-            }
-
-            function renderSupportMessages(messages) {
-                const messageCards = messages.map(([messageId, messageData]) => {
-                    const statusClass = messageData.status === 'open' ? 'warning' : 'success';
-                    
-                    return `
-                        <div class="support-message-card">
-                            <div class="message-header">
-                                <div class="message-user">
-                                    <strong>${messageData.user_email || 'Anonim'}</strong>
-                                    <span class="message-date">${formatDate(messageData.created_at)}</span>
-                                </div>
-                                <span class="status-badge ${statusClass}">
-                                    ${messageData.status === 'open' ? 'Açık' : 'Yanıtlandı'}
-                                </span>
-                            </div>
-                            <div class="message-subject">
-                                <strong>Konu:</strong> ${messageData.subject || 'Genel'}
-                            </div>
-                            <div class="message-content">
-                                ${messageData.message || 'Mesaj içeriği yok'}
-                            </div>
-                            <div class="message-actions">
-                                <button class="btn btn-primary btn-sm" onclick="replyToSupport('${messageId}')">
-                                    <i class="fas fa-reply"></i> Yanıtla
-                                </button>
-                                ${messageData.status === 'open' ? `
-                                    <button class="btn btn-success btn-sm" onclick="markSupportResolved('${messageId}')">
-                                        <i class="fas fa-check"></i> Çözüldü
-                                    </button>
-                                ` : ''}
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-
-                elements.supportMessagesContainer.innerHTML = messageCards;
-            }
-
-            // Helper functions
-            function getSubscriptionStatus(userData) {
-                const now = new Date();
-                const expiryDate = userData.subscription_expiry ? new Date(userData.subscription_expiry) : null;
-                
-                if (!expiryDate) {
-                    return { status: 'inactive', label: 'Pasif', icon: 'fa-times' };
-                }
-
-                const isExpired = now > expiryDate;
-                const subscriptionStatus = userData.subscription_status || 'trial';
-
-                if (isExpired) {
-                    return { status: 'expired', label: 'Süresi Dolmuş', icon: 'fa-times-circle' };
-                }
-
-                switch (subscriptionStatus) {
-                    case 'active':
-                        return { status: 'active', label: 'Aktif', icon: 'fa-check-circle' };
-                    case 'trial':
-                        return { status: 'trial', label: 'Deneme', icon: 'fa-clock' };
-                    default:
-                        return { status: 'inactive', label: 'Pasif', icon: 'fa-times' };
-                }
-            }
-
-            function getExpiryInfo(userData) {
-                if (!userData.subscription_expiry) {
-                    return { date: 'Belirlenmemiş', remaining: null, class: '' };
-                }
-
-                const now = new Date();
-                const expiryDate = new Date(userData.subscription_expiry);
-                const diffTime = expiryDate - now;
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-                const formattedDate = expiryDate.toLocaleDateString('tr-TR', {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit'
-                });
-
-                let remaining = null;
-                let remainingClass = '';
-
-                if (diffDays > 0) {
-                    remaining = `${diffDays} gün kaldı`;
-                    remainingClass = diffDays <= 3 ? 'warning' : 'positive';
-                } else if (diffDays === 0) {
-                    remaining = 'Bugün sona eriyor';
-                    remainingClass = 'warning';
-                } else {
-                    remaining = `${Math.abs(diffDays)} gün önce doldu`;
-                    remainingClass = 'expired';
-                }
-
-                return {
-                    date: formattedDate,
-                    remaining: remaining,
-                    class: remainingClass
-                };
-            }
-
-            function updateStats(stats) {
-                if (elements.totalUsersCount) elements.totalUsersCount.textContent = stats.total;
-                if (elements.activeUsersCount) elements.activeUsersCount.textContent = stats.active;
-                if (elements.trialUsersCount) elements.trialUsersCount.textContent = stats.trial;
-                if (elements.expiredUsersCount) elements.expiredUsersCount.textContent = stats.expired;
-            }
-
-            function formatDate(timestamp) {
-                if (!timestamp) return 'Bilinmiyor';
-                const date = new Date(timestamp);
-                return date.toLocaleDateString('tr-TR', {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-            }
-
-            function escapeHtml(text) {
-                if (!text) return '';
-                const map = {
-                    '&': '&amp;',
-                    '<': '&lt;',
-                    '>': '&gt;',
-                    '"': '&quot;',
-                    "'": '&#039;'
-                };
-                return text.replace(/[&<>"']/g, m => map[m]);
-            }
-
-            function setLoadingState(table) {
-                if (table === 'users' && elements.usersTableBody) {
-                    elements.usersTableBody.innerHTML = `
-                        <tr><td colspan="5" class="text-center loading-message">
-                            <i class="fas fa-spinner fa-spin"></i> Kullanıcılar yükleniyor...
-                        </td></tr>
-                    `;
-                } else if (table === 'payments' && elements.paymentsTableBody) {
-                    elements.paymentsTableBody.innerHTML = `
-                        <tr><td colspan="6" class="text-center loading-message">
-                            <i class="fas fa-spinner fa-spin"></i> Ödeme bildirimleri yükleniyor...
-                        </td></tr>
-                    `;
-                }
-            }
-
-            function showError(message) {
-                hideMessages();
-                if (elements.errorText && elements.errorMessage) {
-                    elements.errorText.textContent = message;
-                    elements.errorMessage.classList.remove('hidden');
-                    setTimeout(hideMessages, 5000);
-                }
-            }
-
-            function showSuccess(message) {
-                hideMessages();
-                if (elements.successText && elements.successMessage) {
-                    elements.successText.textContent = message;
-                    elements.successMessage.classList.remove('hidden');
-                    setTimeout(hideMessages, 3000);
-                }
-            }
-
-            function hideMessages() {
-                if (elements.errorMessage) elements.errorMessage.classList.add('hidden');
-                if (elements.successMessage) elements.successMessage.classList.add('hidden');
-            }
-
-            // Tab switching
-            function setupTabs() {
-                const tabs = document.querySelectorAll('.nav-tab');
-                const tabContents = document.querySelectorAll('.tab-content');
-
-                tabs.forEach(tab => {
-                    tab.addEventListener('click', () => {
-                        const targetTab = tab.dataset.tab;
-                        
-                        // Update active tab
-                        tabs.forEach(t => t.classList.remove('active'));
-                        tab.classList.add('active');
-                        
-                        // Update active content
-                        tabContents.forEach(content => {
-                            content.classList.remove('active');
-                            if (content.id === `${targetTab}-tab`) {
-                                content.classList.add('active');
-                            }
-                        });
-
-                        // Load data for the active tab
-                        if (targetTab === 'users') loadUsers();
-                        else if (targetTab === 'payments') loadPayments();
-                        else if (targetTab === 'support') loadSupportMessages();
-                    });
-                });
-            }
-
-            // Global functions for onclick events
-            window.loadUsers = loadUsers;
-            window.loadPayments = loadPayments;
-            window.loadSupportMessages = loadSupportMessages;
-
-            window.extendSubscription = async (userId, userEmail) => {
-                if (!confirm(`${userEmail} kullanıcısının aboneliğini 30 gün uzatmak istediğinizden emin misiniz?`)) return;
-                
-                try {
-                    const userRef = database.ref(`users/${userId}`);
-                    const snapshot = await userRef.once('value');
-                    const userData = snapshot.val();
-                    
-                    if (!userData) throw new Error('Kullanıcı bulunamadı');
-                    
-                    const now = new Date();
-                    const currentExpiry = userData.subscription_expiry ? new Date(userData.subscription_expiry) : now;
-                    const baseDate = currentExpiry > now ? currentExpiry : now;
-                    const newExpiryDate = new Date(baseDate.getTime() + (30 * 24 * 60 * 60 * 1000));
-                    
-                    await userRef.update({
-                        subscription_expiry: newExpiryDate.toISOString(),
-                        subscription_status: 'active',
-                        last_updated: firebase.database.ServerValue.TIMESTAMP,
-                        updated_by: currentUser.email
-                    });
-                    
-                    showSuccess(`${userEmail} kullanıcısının aboneliği 30 gün uzatıldı!`);
-                    setTimeout(loadUsers, 1500);
-                } catch (error) {
-                    showError('Abonelik uzatılırken hata: ' + error.message);
-                }
-            };
-
-            window.viewUserDetails = (userId) => {
-                alert(`Kullanıcı detayları: ${userId}\n(Detaylı görünüm yakında eklenecek)`);
-            };
-
-            window.approvePayment = async (paymentId) => {
-                if (!confirm('Bu ödemeyi onaylamak istediğinizden emin misiniz?')) return;
-                
-                try {
-                    const paymentRef = database.ref(`payment_notifications/${paymentId}`);
-                    await paymentRef.update({
-                        status: 'approved',
-                        approved_at: firebase.database.ServerValue.TIMESTAMP,
-                        approved_by: currentUser.email
-                    });
-                    
-                    showSuccess('Ödeme onaylandı!');
-                    loadPayments();
-                } catch (error) {
-                    showError('Ödeme onaylanırken hata: ' + error.message);
-                }
-            };
-
-            window.rejectPayment = async (paymentId) => {
-                const reason = prompt('Reddetme sebebi:');
-                if (!reason) return;
-                
-                try {
-                    const paymentRef = database.ref(`payment_notifications/${paymentId}`);
-                    await paymentRef.update({
-                        status: 'rejected',
-                        rejected_at: firebase.database.ServerValue.TIMESTAMP,
-                        rejected_by: currentUser.email,
-                        rejection_reason: reason
-                    });
-                    
-                    showSuccess('Ödeme reddedildi');
-                    loadPayments();
-                } catch (error) {
-                    showError('Ödeme reddedilirken hata: ' + error.message);
-                }
-            };
-
-            window.viewPaymentDetails = (paymentId) => {
-                alert(`Ödeme detayları: ${paymentId}\n(Detaylı görünüm yakında eklenecek)`);
-            };
-
-            window.replyToSupport = (messageId) => {
-                const reply = prompt('Yanıtınızı yazın:');
-                if (!reply) return;
-                
-                // Support reply functionality would be implemented here
-                alert(`Yanıt gönderildi: ${messageId}`);
-                showSuccess('Destek yanıtı gönderildi');
-            };
-
-            window.markSupportResolved = async (messageId) => {
-                try {
-                    const messageRef = database.ref(`support_messages/${messageId}`);
-                    await messageRef.update({
-                        status: 'resolved',
-                        resolved_at: firebase.database.ServerValue.TIMESTAMP,
-                        resolved_by: currentUser.email
-                    });
-                    
-                    showSuccess('Destek talebi çözüldü olarak işaretlendi');
-                    loadSupportMessages();
-                } catch (error) {
-                    showError('Durum güncellenirken hata: ' + error.message);
-                }
-            };
-
-            window.copyToClipboard = async (text) => {
-                try {
-                    await navigator.clipboard.writeText(text);
-                    showSuccess(`Kopyalandı: ${text.substring(0, 20)}...`);
-                } catch (error) {
-                    console.error('Copy failed:', error);
-                    showError('Kopyalama başarısız');
-                }
-            };
-
-            // Event listeners
-            function setupEventListeners() {
-                if (elements.refreshAllBtn) {
-                    elements.refreshAllBtn.addEventListener('click', () => {
-                        loadUsers();
-                        loadPayments();
-                        loadSupportMessages();
-                        showSuccess('Tüm veriler yenilendi');
-                    });
-                }
-
-                if (elements.adminLogoutButton) {
-                    elements.adminLogoutButton.addEventListener('click', async () => {
-                        if (confirm('Admin panelinden çıkış yapmak istediğinizden emin misiniz?')) {
-                            try {
-                                await auth.signOut();
-                                window.location.href = '/login.html';
-                            } catch (error) {
-                                showError('Çıkış yapılırken hata oluştu');
-                            }
-                        }
-                    });
-                }
-
-                if (elements.currentYear) {
-                    elements.currentYear.textContent = new Date().getFullYear();
-                }
-
-                setupTabs();
-            }
-
-            // Main initialization
-            async function initializeApp() {
-                try {
-                    console.log('Initializing complete admin panel...');
-                    
-                    // Initialize Firebase
-                    const firebaseInitialized = await initializeFirebase();
-                    if (!firebaseInitialized) {
-                        throw new Error('Firebase initialization failed');
-                    }
-
-                    // Check authentication and admin role
-                    const isAuthenticated = await checkAuth();
-                    if (!isAuthenticated) {
-                        return;
-                    }
-
-                    // Setup event listeners
-                    setupEventListeners();
-
-                    // Load initial data
-                    await loadUsers();
-                    
-                    // Hide loading screen and show admin panel
-                    if (elements.loadingScreen) {
-                        elements.loadingScreen.style.display = 'none';
-                    }
-                    if (elements.adminContainer) {
-                        elements.adminContainer.classList.remove('hidden');
-                    }
-
-                    showSuccess('Admin paneli başarıyla yüklendi!');
-                    console.log('Complete admin panel initialized successfully');
-
-                } catch (error) {
-                    console.error('Admin panel initialization failed:', error);
-                    
-                    if (elements.loadingScreen) {
-                        elements.loadingScreen.innerHTML = `
-                            <div class="loading-content">
-                                <div class="loading-logo">
-                                    <i class="fas fa-exclamation-triangle" style="color: var(--danger-color);"></i>
-                                    <span>Hata</span>
-                                </div>
-                                <p>Admin panel başlatılırken hata oluştu</p>
-                                <button class="btn btn-primary" onclick="location.reload()" style="margin-top: 1rem;">
-                                    <i class="fas fa-redo"></i> Tekrar Dene
-                                </button>
-                            </div>
-                        `;
-                    }
-                }
-            }
-
-            // Start the application
-            initializeApp();
-
-            // Auto-refresh every 30 seconds
-            setInterval(() => {
-                if (document.querySelector('.nav-tab[data-tab="users"].active')) {
-                    loadUsers();
-                } else if (document.querySelector('.nav-tab[data-tab="payments"].active')) {
-                    loadPayments();
-                } else if (document.querySelector('.nav-tab[data-tab="support"].active')) {
-                    loadSupportMessages();
-                }
-            }, 30000);
-        });
-    </script>
-
-    <style>
-        /* Additional styles for the new features */
-        .admin-nav {
-            background: var(--card-background);
-            border-bottom: 1px solid var(--border-color);
-            padding: 0;
-        }
-
-        .nav-tabs {
-            display: flex;
-            gap: 0;
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 0 1rem;
-        }
-
-        .nav-tab {
-            background: transparent;
-            border: none;
-            color: var(--text-secondary);
-            padding: 1rem 1.5rem;
-            cursor: pointer;
-            font-weight: 500;
-            transition: var(--transition);
-            border-bottom: 3px solid transparent;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .nav-tab:hover {
-            color: var(--text-primary);
-            background: var(--background-secondary);
-        }
-
-        .nav-tab.active {
-            color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
-            font-weight: 600;
-        }
-
-        .tab-content {
-            display: none;
-            animation: fadeIn 0.3s ease-in-out;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        .support-message-card {
-            background: var(--background-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 0.75rem;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-            transition: var(--transition);
-        }
-
-        .support-message-card:hover {
-            background: var(--card-background-secondary);
-        }
-
-        .message-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1rem;
-        }
-
-        .message-user {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-        }
-
-        .message-date {
-            font-size: 0.875rem;
-            color: var(--text-muted);
-        }
-
-        .message-subject {
-            margin-bottom: 1rem;
-            font-weight: 500;
-            color: var(--text-primary);
-        }
-
-        .message-content {
-            background: var(--card-background);
-            padding: 1rem;
-            border-radius: 0.5rem;
-            margin-bottom: 1rem;
-            border-left: 4px solid var(--primary-color);
-            line-height: 1.6;
-        }
-
-        .message-actions {
-            display: flex;
-            gap: 0.5rem;
-        }
-
-        .system-info {
-            padding: 1.5rem;
-        }
-
-        .info-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-        }
-
-        .info-card {
-            background: var(--background-secondary);
-            padding: 1.5rem;
-            border-radius: 0.75rem;
-            border: 1px solid var(--border-color);
-        }
-
-        .info-card h3 {
-            font-size: 1rem;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 1rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .status-indicator .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--danger-color);
-            animation: pulse 2s infinite;
-        }
-
-        .status-indicator.active .status-dot {
-            background: var(--success-color);
-        }
-
-        .status-indicator.error .status-dot {
-            background: var(--danger-color);
-        }
-
-        .empty-state {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            padding: 3rem 2rem;
-            color: var(--text-muted);
-        }
-
-        .empty-state i {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-            opacity: 0.5;
-        }
-
-        .empty-state h3 {
-            font-size: 1.125rem;
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-            color: var(--text-secondary);
-        }
-
-        #status-messages {
-            position: fixed;
-            top: 1rem;
-            right: 1rem;
-            z-index: 1000;
-            max-width: 400px;
-        }
-
-        @media (max-width: 768px) {
-            .nav-tabs {
-                overflow-x: auto;
-                gap: 0;
-            }
-            
-            .nav-tab {
-                white-space: nowrap;
-                min-width: 120px;
-                justify-content: center;
-            }
-            
-            .info-grid {
-                grid-template-columns: 1fr;
-                gap: 1rem;
-            }
-            
-            .message-header {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 1rem;
-            }
-            
-            .message-actions {
-                flex-direction: column;
-                gap: 0.5rem;
-            }
-            
-            #status-messages {
-                left: 1rem;
-                right: 1rem;
-                max-width: none;
-            }
-        }
-    </style>
+    <script src="/static/admin.js"></script>
 </body>
-</html>total;
-                if (elements.activeUsersCount) elements.activeUsersCount.textContent = stats.
+</html>
