@@ -163,21 +163,29 @@ async def get_firebase_config():
     try:
         logger.info("Firebase config requested from frontend")
         
-        firebase_web_config = settings.get_firebase_web_config()
+        # Directly return Firebase Web config from environment
+        firebase_config = {
+            "apiKey": settings.FIREBASE_WEB_API_KEY,
+            "authDomain": settings.FIREBASE_WEB_AUTH_DOMAIN,
+            "databaseURL": settings.FIREBASE_DATABASE_URL,
+            "projectId": settings.FIREBASE_WEB_PROJECT_ID,
+            "storageBucket": settings.FIREBASE_WEB_STORAGE_BUCKET,
+            "messagingSenderId": settings.FIREBASE_WEB_MESSAGING_SENDER_ID,
+            "appId": settings.FIREBASE_WEB_APP_ID
+        }
         
-        # Eksik alanları kontrol et
-        required_fields = ["apiKey", "authDomain", "projectId", "appId"]
-        missing_fields = [k for k in required_fields if not firebase_web_config.get(k)]
-        
+        # Check for missing fields
+        missing_fields = [k for k, v in firebase_config.items() if not v]
         if missing_fields:
-            logger.warning(f"Missing Firebase config fields: {missing_fields}")
+            logger.error(f"Missing Firebase config fields: {missing_fields}")
             raise HTTPException(
-                status_code=500, 
-                detail=f"Firebase configuration incomplete. Missing: {', '.join(missing_fields)}"
+                status_code=500,
+                detail=f"Missing Firebase environment variables: {missing_fields}"
             )
         
-        logger.info(f"Firebase config loaded successfully for project: {firebase_web_config.get('projectId', 'unknown')}")
-        return firebase_web_config
+        logger.info(f"Firebase config provided for project: {firebase_config['projectId']}")
+        return firebase_config
+        
     except Exception as e:
         logger.error(f"Firebase config error: {e}")
         raise HTTPException(status_code=500, detail=f"Firebase configuration error: {str(e)}")
