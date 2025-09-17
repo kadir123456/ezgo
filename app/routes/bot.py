@@ -5,6 +5,7 @@ from app.firebase_manager import firebase_manager
 from app.utils.crypto import encrypt_data, decrypt_data
 from app.utils.validation import EnhancedStartRequest, EnhancedApiKeysRequest
 from app.utils.metrics import metrics
+from app.binance_client import BinanceClient
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 import logging
@@ -120,12 +121,28 @@ async def save_api_keys(
         encrypted_api_key = encrypt_data(request.api_key)
         encrypted_api_secret = encrypt_data(request.api_secret)
         
+        # API anahtarlarını test et
+        try:
+            test_client = BinanceClient(request.api_key, request.api_secret)
+            await test_client.initialize()
+            
+            # Test balance call
+            balance = await test_client.get_account_balance(use_cache=False)
+            logger.info(f"API test successful for user {user_id}, balance: {balance}")
+            
+            await test_client.close()
+            
+        except Exception as e:
+            logger.error(f"API test failed for user {user_id}: {e}")
+            raise HTTPException(status_code=400, detail=f"API anahtarları geçersiz: {str(e)}")
+        
         # Firebase'e kaydet
         api_data = {
             "binance_api_key": encrypted_api_key,
             "binance_api_secret": encrypted_api_secret,
             "api_testnet": request.testnet,
             "api_keys_set": True,
+            "api_connection_verified": True,
             "api_updated_at": firebase_manager.get_server_timestamp()
         }
         
@@ -138,7 +155,8 @@ async def save_api_keys(
         
         return {
             "success": True,
-            "message": "API anahtarları başarıyla kaydedildi"
+            "message": "API anahtarları başarıyla kaydedildi ve test edildi",
+            "balance": balance
         }
         
     except HTTPException:
