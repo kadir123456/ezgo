@@ -433,6 +433,8 @@ async function extendSubscription(userId, userEmail) {
     if (!confirm(`${userEmail} kullanıcısının aboneliğini 30 gün uzatmak istediğinizden emin misiniz?`)) return;
     
     try {
+        showToast('Abonelik uzatılıyor...', 'info');
+        
         const userRef = database.ref(`users/${userId}`);
         const snapshot = await userRef.once('value');
         const userData = snapshot.val();
@@ -445,14 +447,20 @@ async function extendSubscription(userId, userEmail) {
         const newExpiryDate = new Date(baseDate.getTime() + (30 * 24 * 60 * 60 * 1000));
         
         await userRef.update({
-            subscription_expiry: newExpiryDate.toISOString(),
+            subscription_expiry: newExpiryDate.getTime(),
             subscription_status: 'active',
+            subscription_extended_by: currentUser.email,
+            subscription_extended_at: firebase.database.ServerValue.TIMESTAMP,
             last_updated: firebase.database.ServerValue.TIMESTAMP,
             updated_by: currentUser.email
         });
         
-        showToast(`${userEmail} kullanıcısının aboneliği 30 gün uzatıldı!`, 'success');
-        setTimeout(loadUsers, 1500);
+        showToast(`✅ ${userEmail} kullanıcısının aboneliği 30 gün uzatıldı! Yeni bitiş tarihi: ${newExpiryDate.toLocaleDateString('tr-TR')}`, 'success');
+        
+        // Immediately reload users to show updated data
+        setTimeout(() => {
+            loadUsers();
+        }, 1000);
         
     } catch (error) {
         console.error('Error extending subscription:', error);
@@ -468,15 +476,56 @@ async function approvePayment(paymentId) {
     if (!confirm('Bu ödemeyi onaylamak istediğinizden emin misiniz?')) return;
     
     try {
+        showToast('Ödeme onaylanıyor...', 'info');
+        
         const paymentRef = database.ref(`payment_notifications/${paymentId}`);
+        const paymentSnapshot = await paymentRef.once('value');
+        const paymentData = paymentSnapshot.val();
+        
+        if (!paymentData) {
+            throw new Error('Ödeme verisi bulunamadı');
+        }
+        
+        // First approve the payment
         await paymentRef.update({
             status: 'approved',
             approved_at: firebase.database.ServerValue.TIMESTAMP,
             approved_by: currentUser.email
         });
         
-        showToast('Ödeme onaylandı!', 'success');
-        loadPayments();
+        // Then extend user subscription by 30 days
+        if (paymentData.user_id) {
+            const userRef = database.ref(`users/${paymentData.user_id}`);
+            const userSnapshot = await userRef.once('value');
+            const userData = userSnapshot.val();
+            
+            if (userData) {
+                const now = new Date();
+                const currentExpiry = userData.subscription_expiry ? new Date(userData.subscription_expiry) : now;
+                const baseDate = currentExpiry > now ? currentExpiry : now;
+                const newExpiryDate = new Date(baseDate.getTime() + (30 * 24 * 60 * 60 * 1000));
+                
+                await userRef.update({
+                    subscription_expiry: newExpiryDate.getTime(),
+                    subscription_status: 'active',
+                    payment_approved_by: currentUser.email,
+                    payment_approved_at: firebase.database.ServerValue.TIMESTAMP,
+                    last_updated: firebase.database.ServerValue.TIMESTAMP
+                });
+                
+                showToast(`✅ Ödeme onaylandı ve ${userData.email} kullanıcısının aboneliği 30 gün uzatıldı!`, 'success');
+            } else {
+                showToast('⚠️ Ödeme onaylandı ancak kullanıcı bulunamadı', 'warning');
+            }
+        } else {
+            showToast('✅ Ödeme onaylandı!', 'success');
+        }
+        
+        // Reload both payments and users
+        setTimeout(() => {
+            loadPayments();
+            loadUsers();
+        }, 1000);
         
     } catch (error) {
         console.error('Error approving payment:', error);
