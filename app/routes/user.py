@@ -1,14 +1,14 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer
 from app.firebase_manager import firebase_manager
-from app.utils.logger import get_logger
 from app.utils.crypto import decrypt_data
 from pydantic import BaseModel
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 from datetime import datetime, timezone
+import logging
 
-logger = get_logger("user_routes")
+logger = logging.getLogger("user_routes")
 router = APIRouter(prefix="/api/user", tags=["user"])
 security = HTTPBearer()
 
