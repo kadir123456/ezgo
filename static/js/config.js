@@ -33,7 +33,7 @@ class ConfigLoader {
             }
 
             console.log('✅ Firebase config loaded from environment variables');
-            console.log('📋 Project ID:', this.firebaseConfig.projectId);
+            // GÜVENLİK: Firebase config detayları console'da gösterilmiyor
 
             // App info'yu backend'den al
             const appResponse = await fetch('/api/app-info');
@@ -43,9 +43,7 @@ class ConfigLoader {
             this.appInfo = await appResponse.json();
 
             console.log('✅ App info loaded from environment variables');
-            console.log('💰 Bot Price:', this.appInfo.bot_price);
-            console.log('💳 Payment Address:', this.appInfo.payment_address);
-
+            // GÜVENLİK: Payment bilgileri console'da gösterilmiyor
             this.isLoaded = true;
             
             return {
