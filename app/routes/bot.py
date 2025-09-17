@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer
-from app.bot_manager import bot_manager, StartRequest
+from app.bot_manager import bot_manager
 from app.firebase_manager import firebase_manager
 from app.utils.crypto import encrypt_data, decrypt_data
-from pydantic import BaseModel
+from app.utils.validation import EnhancedStartRequest, EnhancedApiKeysRequest
+from app.utils.metrics import metrics
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 import logging
@@ -11,11 +12,6 @@ import logging
 logger = logging.getLogger("bot_routes")
 router = APIRouter(prefix="/api/bot", tags=["bot"])
 security = HTTPBearer()
-
-class ApiKeysRequest(BaseModel):
-    api_key: str
-    api_secret: str
-    testnet: bool = False
 
 async def get_current_user(token: str = Depends(security)):
     """JWT token'dan kullanıcı bilgilerini al"""
@@ -28,7 +24,7 @@ async def get_current_user(token: str = Depends(security)):
 
 @router.post("/start")
 async def start_bot(
-    request: StartRequest,
+    request: EnhancedStartRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """Kullanıcı için bot başlat"""
@@ -52,6 +48,9 @@ async def start_bot(
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
         
+        # Metrics kaydet
+        metrics.record_bot_start(user_id, request.symbol)
+        
         return {
             "success": True,
             "message": "Bot başarıyla başlatıldı",
@@ -62,6 +61,7 @@ async def start_bot(
         raise
     except Exception as e:
         logger.error(f"Bot start error: {e}")
+        metrics.record_error("bot_start_failed", "bot_manager")
         raise HTTPException(status_code=500, detail=f"Bot başlatılamadı: {str(e)}")
 
 @router.post("/stop")
@@ -75,6 +75,9 @@ async def stop_bot(current_user: dict = Depends(get_current_user)):
         
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
+        
+        # Metrics kaydet
+        metrics.record_bot_stop(user_id, "manual", "user_request")
         
         return {
             "success": True,
@@ -105,7 +108,7 @@ async def get_bot_status(current_user: dict = Depends(get_current_user)):
 
 @router.post("/api-keys")
 async def save_api_keys(
-    request: ApiKeysRequest,
+    request: EnhancedApiKeysRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """Kullanıcının API anahtarlarını kaydet"""
@@ -123,10 +126,13 @@ async def save_api_keys(
             "binance_api_secret": encrypted_api_secret,
             "api_testnet": request.testnet,
             "api_keys_set": True,
-            "api_updated_at": firebase_manager.db.reference().server_timestamp
+            "api_updated_at": firebase_manager.get_server_timestamp()
         }
         
-        firebase_manager.db.reference(f'users/{user_id}').update(api_data)
+        success = firebase_manager.update_user_data(user_id, api_data)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="API anahtarları kaydedilemedi")
         
         logger.info(f"API keys saved for user: {user_id}")
         
@@ -135,6 +141,8 @@ async def save_api_keys(
             "message": "API anahtarları başarıyla kaydedildi"
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"API keys save error: {e}")
         raise HTTPException(status_code=500, detail=f"API anahtarları kaydedilemedi: {str(e)}")
@@ -162,17 +170,16 @@ async def get_api_status(current_user: dict = Depends(get_current_user)):
                 "message": "API anahtarları ayarlanmamış"
             }
         
-        # API bağlantısını test et (basit kontrol)
+        # API bağlantısını test et
         try:
             encrypted_api_key = user_data.get('binance_api_key')
             encrypted_api_secret = user_data.get('binance_api_secret')
             
             if encrypted_api_key and encrypted_api_secret:
-                # Şifreleri çöz ve test et
                 api_key = decrypt_data(encrypted_api_key)
                 api_secret = decrypt_data(encrypted_api_secret)
                 
-                if api_key and api_secret:
+                if api_key and api_secret and len(api_key) == 64 and len(api_secret) == 64:
                     return {
                         "hasApiKeys": True,
                         "isConnected": True,
@@ -182,7 +189,7 @@ async def get_api_status(current_user: dict = Depends(get_current_user)):
                     return {
                         "hasApiKeys": True,
                         "isConnected": False,
-                        "message": "API anahtarları çözülemedi"
+                        "message": "API anahtarları geçersiz format"
                     }
             else:
                 return {
