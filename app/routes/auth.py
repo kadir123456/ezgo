@@ -2,13 +2,13 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, EmailStr
 from app.firebase_manager import firebase_manager
-from app.utils.logger import get_logger
 from app.utils.validation import EnhancedApiKeysRequest
 from app.utils.crypto import encrypt_data, decrypt_data
 import firebase_admin
 from firebase_admin import auth as firebase_auth
+import logging
 
-logger = get_logger("auth_routes")
+logger = logging.getLogger("auth_routes")
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 security = HTTPBearer()
 
