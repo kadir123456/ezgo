@@ -1,9 +1,11 @@
+# UPDATED bot_manager.py - BotCore entegrasyonu ile
+
 import asyncio
 import hashlib
 import time
 from typing import Dict, Optional, Set
 from collections import defaultdict
-from app.bot_core import BotCore
+from app.bot_core import BotCore  # ← Zaten var
 from app.binance_client import BinanceClient
 from app.utils.logger import get_logger
 from app.utils.crypto import decrypt_data
@@ -40,7 +42,7 @@ class ConnectionPool:
         # Client yoksa oluştur
         if api_hash not in self.clients:
             client = BinanceClient(api_key, api_secret)
-            await client.initialize()
+            # NOT: initialize BotCore'da yapılacak
             self.clients[api_hash] = client
             logger.info(f"New shared client created: {api_hash[:8]}... for user: {user_id}")
         
@@ -143,15 +145,18 @@ class BatchFirebaseUpdater:
 
 class OptimizedBotManager:
     """
-    Scalable Multi-user Bot Manager
-    - Connection pooling
-    - Batch Firebase updates  
-    - Rate limiting
-    - 3 dakika intervals
+    UPDATED: Scalable Multi-user Bot Manager + REAL TRADING
+    - Connection pooling ✅
+    - Batch Firebase updates ✅ 
+    - Rate limiting ✅
+    - BotCore integration ✅ (TRADING ENABLED)
     """
     
     def __init__(self):
-        # Lightweight user tracking (no heavy BotCore instances)
+        # ✅ EKLENEN: BotCore instances - GERÇEK TRADING
+        self.bot_instances: Dict[str, BotCore] = {}  # user_id -> BotCore
+        
+        # Mevcut yapı korundu
         self.active_users: Dict[str, dict] = {}  # user_id -> user_config
         self.user_statuses: Dict[str, dict] = {}  # user_id -> bot_status
         
@@ -168,19 +173,19 @@ class OptimizedBotManager:
         self._monitor_task = None
         self._running = False
         
-        logger.info("OptimizedBotManager initialized with scalable architecture")
+        logger.info("OptimizedBotManager initialized with BotCore TRADING enabled")
 
     async def start_bot_for_user(self, uid: str, bot_settings: StartRequest) -> Dict:
         """
-        Kullanıcı için lightweight bot başlat
+        ✅ UPDATED: GERÇEK BotCore ile trading bot başlat
         """
         try:
-            logger.info(f"Starting optimized bot for user: {uid}")
+            logger.info(f"Starting REAL trading bot for user: {uid}")
             
-            # Kullanıcı zaten aktifse durdur
+            # Mevcut bot varsa durdur
             if uid in self.active_users:
                 await self.stop_bot_for_user(uid)
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1)
 
             # Firebase'den kullanıcı verilerini al
             try:
@@ -208,7 +213,7 @@ class OptimizedBotManager:
                 if not api_key or not api_secret:
                     return {"error": "API anahtarları çözülemedi."}
 
-                # Shared client al
+                # ✅ UPDATED: Shared client al (connection pooling korundu)
                 shared_client = await self.connection_pool.get_client(uid, api_key, api_secret)
                 
                 # Rate limit kontrolü
@@ -216,51 +221,57 @@ class OptimizedBotManager:
                 if not can_proceed:
                     return {"error": "API rate limit aşıldı. 3 dakika sonra tekrar deneyin."}
 
-                # Test connection
-                try:
-                    test_balance = await shared_client.get_account_balance(use_cache=True)
-                    logger.info(f"Shared client tested for user: {uid}, balance: {test_balance}")
-                except Exception as e:
-                    return {"error": f"Binance bağlantısı kurulamadı: {str(e)}"}
-
-                # Lightweight user config kaydet
+                # ✅ EKLENEN: BotCore instance oluştur ve başlat
+                bot_settings_dict = bot_settings.model_dump()
+                bot_core = BotCore(uid, shared_client, bot_settings_dict)
+                
+                # BotCore'u başlat (WebSocket + Trading logic)
+                await bot_core.start()
+                
+                # BotCore instance'ını kaydet
+                self.bot_instances[uid] = bot_core
+                
+                # User config kaydet (mevcut yapı korundu)
                 user_config = {
                     "uid": uid,
                     "api_key": api_key,
                     "api_secret": api_secret,
-                    "settings": bot_settings.model_dump(),
+                    "settings": bot_settings_dict,
                     "start_time": time.time()
                 }
                 
                 self.active_users[uid] = user_config
                 
-                # Initial status
+                # ✅ UPDATED: BotCore'dan initial status al
+                bot_status = bot_core.get_status()
                 self.user_statuses[uid] = {
                     "user_id": uid,
                     "is_running": True,
                     "symbol": bot_settings.symbol,
                     "timeframe": bot_settings.timeframe,
                     "leverage": bot_settings.leverage,
-                    "position_side": None,
-                    "status_message": f"Bot aktif - {bot_settings.symbol} (optimized)",
-                    "account_balance": test_balance,
-                    "position_pnl": 0.0,
-                    "total_trades": 0,
-                    "total_pnl": 0.0,
-                    "last_check_time": time.time()
+                    "position_side": bot_status.get("position_side"),
+                    "status_message": f"REAL Bot aktif - {bot_settings.symbol} (WebSocket + Trading)",
+                    "account_balance": bot_status.get("account_balance", 0),
+                    "position_pnl": bot_status.get("position_pnl", 0),
+                    "total_trades": bot_status.get("total_trades", 0),
+                    "total_pnl": bot_status.get("total_pnl", 0),
+                    "last_check_time": time.time(),
+                    "current_price": bot_status.get("current_price"),
+                    "data_candles": bot_status.get("data_candles", 0)
                 }
 
                 # Background monitor başlat (eğer ilk user ise)
                 if not self._running:
                     self._running = True
                     self._monitor_task = asyncio.create_task(self._global_monitor_loop())
-                    logger.info("Global monitor started")
+                    logger.info("Global monitor started with BotCore integration")
 
-                logger.info(f"Optimized bot started for user: {uid}")
+                logger.info(f"REAL trading bot started for user: {uid}")
                 
                 return {
                     "success": True,
-                    "message": "Bot başarıyla başlatıldı (optimized)",
+                    "message": "GERÇEK trading bot başarıyla başlatıldı",
                     "status": self.user_statuses[uid]
                 }
                 
@@ -274,11 +285,18 @@ class OptimizedBotManager:
 
     async def stop_bot_for_user(self, uid: str) -> Dict:
         """
-        Kullanıcı botunu durdur
+        ✅ UPDATED: BotCore'u da durdur
         """
         try:
             if uid not in self.active_users:
                 return {"error": "Durdurulacak aktif bir bot bulunamadı."}
+
+            # ✅ EKLENEN: BotCore'u durdur
+            if uid in self.bot_instances:
+                bot_core = self.bot_instances[uid]
+                await bot_core.stop()
+                del self.bot_instances[uid]
+                logger.info(f"BotCore stopped for user: {uid}")
 
             user_config = self.active_users[uid]
             api_key = user_config.get("api_key")
@@ -298,7 +316,7 @@ class OptimizedBotManager:
             self.last_position_check.pop(uid, None)
             self.last_firebase_update.pop(uid, None)
 
-            logger.info(f"Optimized bot stopped for user: {uid}")
+            logger.info(f"Complete bot stopped for user: {uid}")
             
             return {"success": True, "message": "Bot başarıyla durduruldu."}
 
@@ -308,19 +326,21 @@ class OptimizedBotManager:
 
     def get_bot_status(self, uid: str) -> Dict:
         """
-        Kullanıcının bot durumunu döndür
+        ✅ UPDATED: BotCore'dan gerçek status al
         """
-        if uid in self.user_statuses:
-            status = self.user_statuses[uid].copy()
+        if uid in self.bot_instances:
+            # BotCore'dan gerçek status al
+            bot_core = self.bot_instances[uid]
+            real_status = bot_core.get_status()
             
             # Pool stats ekle
             pool_stats = self.connection_pool.get_stats()
-            status["pool_info"] = {
+            real_status["pool_info"] = {
                 "shared_clients": pool_stats["total_shared_clients"],
                 "total_users": pool_stats["total_users_served"]
             }
             
-            return status
+            return real_status
         
         return {
             "user_id": uid,
@@ -337,19 +357,19 @@ class OptimizedBotManager:
 
     async def _global_monitor_loop(self):
         """
-        Global monitoring - tüm kullanıcılar için batch operations
-        3 dakika intervals ile
+        ✅ UPDATED: BotCore status'ları ile sync
         """
-        logger.info("Global monitor loop started with 3-minute intervals")
+        logger.info("Global monitor loop started with BotCore integration")
         
         while self._running:
             try:
                 current_time = time.time()
                 
-                # Her kullanıcı için 3 dakikada bir kontroller
+                # Her kullanıcı için monitoring + BotCore sync
                 for uid, user_config in list(self.active_users.items()):
                     try:
                         await self._monitor_user(uid, user_config, current_time)
+                        await self._sync_botcore_status(uid)  # ✅ EKLENEN
                     except Exception as e:
                         logger.error(f"Monitor error for user {uid}: {e}")
 
@@ -365,82 +385,48 @@ class OptimizedBotManager:
                 logger.error(f"Global monitor error: {e}")
                 await asyncio.sleep(10)
 
+    async def _sync_botcore_status(self, uid: str):
+        """
+        ✅ EKLENEN: BotCore status'unu user_statuses ile sync et
+        """
+        if uid in self.bot_instances and uid in self.user_statuses:
+            try:
+                bot_core = self.bot_instances[uid]
+                real_status = bot_core.get_status()
+                
+                # Key field'ları güncelle
+                self.user_statuses[uid].update({
+                    "position_side": real_status.get("position_side"),
+                    "account_balance": real_status.get("account_balance", 0),
+                    "position_pnl": real_status.get("position_pnl", 0),
+                    "total_trades": real_status.get("total_trades", 0),
+                    "total_pnl": real_status.get("total_pnl", 0),
+                    "current_price": real_status.get("current_price"),
+                    "status_message": real_status.get("status_message", ""),
+                    "last_check_time": time.time()
+                })
+                
+            except Exception as e:
+                logger.error(f"BotCore sync error for user {uid}: {e}")
+
     async def _monitor_user(self, uid: str, user_config: dict, current_time: float):
         """
-        Einzelnen kullanıcıyı monitor et - 3 dakika intervals
+        ✅ SIMPLIFIED: BotCore artık kendi monitoring'ini yapıyor
         """
-        api_key = user_config.get("api_key")
-        api_secret = user_config.get("api_secret")
-        
-        if not api_key or not api_secret:
-            return
-
-        # 3 dakika interval kontrolü
-        balance_interval = 180  # 3 dakika
-        position_interval = 60   # 1 dakika
-        firebase_interval = 180  # 3 dakika
-
-        # Balance check (3 dakikada bir)
-        if current_time - self.last_balance_check.get(uid, 0) > balance_interval:
-            await self._update_user_balance(uid, api_key, api_secret)
-            self.last_balance_check[uid] = current_time
-
-        # Position check (1 dakikada bir)  
-        if current_time - self.last_position_check.get(uid, 0) > position_interval:
-            await self._check_user_positions(uid, user_config)
-            self.last_position_check[uid] = current_time
-
         # Firebase update (3 dakikada bir)
+        firebase_interval = 180  # 3 dakika
         if current_time - self.last_firebase_update.get(uid, 0) > firebase_interval:
             self._queue_firebase_update(uid)
             self.last_firebase_update[uid] = current_time
 
+    # Diğer metodlar aynı kalıyor...
     async def _update_user_balance(self, uid: str, api_key: str, api_secret: str):
-        """Balance güncelle (rate limited)"""
-        try:
-            # Rate limit check
-            can_call = await self.connection_pool.rate_limit_check(api_key, api_secret)
-            if not can_call:
-                logger.warning(f"Balance update skipped for user {uid} - rate limited")
-                return
-
-            client = await self.connection_pool.get_client(uid, api_key, api_secret)
-            balance = await client.get_account_balance(use_cache=True)
-            
-            if uid in self.user_statuses:
-                self.user_statuses[uid]["account_balance"] = balance
-                self.user_statuses[uid]["last_check_time"] = time.time()
-                
-        except Exception as e:
-            logger.error(f"Balance update error for user {uid}: {e}")
+        """Balance güncelle (rate limited) - BotCore zaten yapıyor"""
+        pass  # BotCore kendi balance'ını güncelliyor
 
     async def _check_user_positions(self, uid: str, user_config: dict):
-        """Position kontrolü"""
-        try:
-            api_key = user_config.get("api_key")
-            api_secret = user_config.get("api_secret")
-            symbol = user_config["settings"]["symbol"]
-            
-            # Rate limit check
-            can_call = await self.connection_pool.rate_limit_check(api_key, api_secret)
-            if not can_call:
-                return
-
-            client = await self.connection_pool.get_client(uid, api_key, api_secret)
-            positions = await client.get_open_positions(symbol, use_cache=True)
-            
-            if uid in self.user_statuses:
-                if positions:
-                    position = positions[0]
-                    position_amt = float(position['positionAmt'])
-                    self.user_statuses[uid]["position_side"] = "LONG" if position_amt > 0 else "SHORT"
-                    self.user_statuses[uid]["position_pnl"] = float(position.get('unRealizedProfit', 0))
-                else:
-                    self.user_statuses[uid]["position_side"] = None
-                    self.user_statuses[uid]["position_pnl"] = 0.0
-                    
-        except Exception as e:
-            logger.error(f"Position check error for user {uid}: {e}")
+        """Position kontrolü - BotCore zaten yapıyor"""
+        pass  # BotCore kendi position'ını güncelliyor
 
     def _queue_firebase_update(self, uid: str):
         """Firebase update'i queue'ya ekle"""
@@ -449,6 +435,9 @@ class OptimizedBotManager:
                 "bot_active": True,
                 "account_balance": self.user_statuses[uid].get("account_balance", 0),
                 "position_side": self.user_statuses[uid].get("position_side"),
+                "total_trades": self.user_statuses[uid].get("total_trades", 0),
+                "total_pnl": self.user_statuses[uid].get("total_pnl", 0),
+                "current_price": self.user_statuses[uid].get("current_price"),
                 "last_bot_update": int(time.time() * 1000)
             }
             self.firebase_batcher.queue_update(uid, update_data)
@@ -468,13 +457,18 @@ class OptimizedBotManager:
 
     async def shutdown_all_bots(self):
         """
-        Tüm botları güvenli şekilde durdur
+        ✅ UPDATED: BotCore instance'larını da durdur
         """
         try:
             self._running = False
             
             if self._monitor_task and not self._monitor_task.done():
                 self._monitor_task.cancel()
+
+            # ✅ EKLENEN: Tüm BotCore instance'larını durdur
+            for uid, bot_core in list(self.bot_instances.items()):
+                await bot_core.stop()
+            self.bot_instances.clear()
 
             # Tüm shared client'ları kapat
             for client in self.connection_pool.clients.values():
@@ -487,30 +481,38 @@ class OptimizedBotManager:
             self.user_statuses.clear()
             self.connection_pool = ConnectionPool()
             
-            logger.info("All optimized bots shutdown completed")
+            logger.info("All BotCore instances and optimized bots shutdown completed")
             
         except Exception as e:
             logger.error(f"Shutdown error: {e}")
 
     def get_active_bot_count(self) -> int:
         """Aktif bot sayısı"""
-        return len(self.active_users)
+        return len(self.bot_instances)  # ✅ UPDATED: BotCore instance sayısı
 
     def get_system_stats(self) -> dict:
-        """Sistem istatistikleri"""
+        """✅ UPDATED: BotCore istatistikleri dahil"""
         pool_stats = self.connection_pool.get_stats()
+        
+        # BotCore stats
+        trading_bots = len(self.bot_instances)
+        active_traders = sum(1 for uid in self.bot_instances 
+                           if self.user_statuses.get(uid, {}).get("position_side"))
         
         return {
             "total_active_users": len(self.active_users),
+            "trading_bots_running": trading_bots,
+            "bots_with_positions": active_traders,
             "active_user_ids": list(self.active_users.keys()),
             "shared_clients": pool_stats["total_shared_clients"],
             "total_connections_saved": pool_stats["total_users_served"] - pool_stats["total_shared_clients"],
-            "system_status": "optimized",
-            "architecture": "scalable_lightweight",
-            "intervals": {
-                "balance_check": "3 minutes",
-                "position_check": "1 minute", 
-                "firebase_batch": "3 minutes"
+            "system_status": "BotCore_integrated",
+            "architecture": "scalable_trading_enabled",
+            "features": {
+                "real_trading": "✅ ENABLED",
+                "websocket_data": "✅ ENABLED", 
+                "connection_pooling": "✅ ENABLED",
+                "firebase_batching": "✅ ENABLED"
             }
         }
 
