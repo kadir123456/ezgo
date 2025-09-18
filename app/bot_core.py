@@ -501,8 +501,7 @@ class BotCore:
             except Exception as e:
                 logger.error(f"Monitor loop error for user {self.user_id}: {e}")
                 await asyncio.sleep(10)
-
-    async def _update_user_data(self):
+                async def _update_user_data(self):
     """Kullanıcı verilerini Firebase'de güncelle"""
     try:
         from app.main import firebase_db, firebase_initialized
