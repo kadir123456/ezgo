@@ -3,15 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from app.config import settings
 from app.utils.metrics import metrics, get_metrics_data, get_metrics_content_type
-from app.firebase_manager import firebase_manager
 import logging
 import time
 from typing import Optional
-import firebase_admin
-from firebase_admin import auth as firebase_auth
+import json
+import os
 
 # Setup logging
 logging.basicConfig(
@@ -19,6 +18,86 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("main")
+
+# Initialize Firebase Admin SDK
+firebase_admin = None
+firebase_auth = None
+firebase_db = None
+
+def initialize_firebase():
+    """Initialize Firebase Admin SDK with better error handling"""
+    global firebase_admin, firebase_auth, firebase_db
+    
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, auth as firebase_auth_module, db as firebase_db_module
+        
+        if not firebase_admin._apps:
+            # Get credentials from environment
+            cred_json_str = os.getenv("FIREBASE_CREDENTIALS_JSON")
+            database_url = os.getenv("FIREBASE_DATABASE_URL")
+            
+            if not cred_json_str or not database_url:
+                logger.error("Firebase credentials not found in environment")
+                return False
+            
+            try:
+                # Clean JSON string for production
+                if cred_json_str.startswith('"') and cred_json_str.endswith('"'):
+                    cred_json_str = cred_json_str[1:-1]
+                
+                # Handle escaped characters
+                import codecs
+                cred_json_str = codecs.decode(cred_json_str, 'unicode_escape')
+                
+                # Remove problematic control characters but preserve newlines in private key
+                import re
+                cred_json_str = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', cred_json_str)
+                
+                # Parse JSON
+                cred_dict = json.loads(cred_json_str)
+                
+                # Validate required fields
+                required_fields = ['type', 'project_id', 'private_key', 'client_email']
+                missing_fields = [field for field in required_fields if field not in cred_dict]
+                
+                if missing_fields:
+                    logger.error(f"Missing Firebase fields: {missing_fields}")
+                    return False
+                
+                # Initialize Firebase
+                cred = credentials.Certificate(cred_dict)
+                firebase_admin.initialize_app(cred, {
+                    'databaseURL': database_url
+                })
+                
+                firebase_auth = firebase_auth_module
+                firebase_db = firebase_db_module
+                
+                logger.info("Firebase Admin SDK initialized successfully")
+                return True
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Firebase JSON parse error: {e}")
+                return False
+            except Exception as e:
+                logger.error(f"Firebase initialization error: {e}")
+                return False
+        else:
+            firebase_auth = firebase_auth_module
+            firebase_db = firebase_db_module
+            logger.info("Firebase already initialized")
+            return True
+            
+    except ImportError as e:
+        logger.error(f"Firebase import error: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected Firebase error: {e}")
+        return False
+
+# Initialize Firebase on startup
+firebase_initialized = initialize_firebase()
 
 # FastAPI app
 app = FastAPI(
@@ -48,6 +127,10 @@ async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] =
     """Firebase Auth token verification"""
     if not credentials:
         raise HTTPException(status_code=401, detail="Authentication token required")
+    
+    if not firebase_initialized or not firebase_auth:
+        logger.error("Firebase not initialized for authentication")
+        raise HTTPException(status_code=500, detail="Authentication service unavailable")
     
     try:
         # Verify Firebase token
@@ -94,7 +177,7 @@ async def startup_event():
     logger.info(f"Debug mode: {settings.DEBUG}")
     
     # Check Firebase connection
-    if firebase_manager.is_initialized():
+    if firebase_initialized:
         logger.info("Firebase connection verified")
     else:
         logger.error("Firebase connection failed")
@@ -126,14 +209,12 @@ async def shutdown_event():
 async def health_check():
     """Health check endpoint"""
     try:
-        firebase_status = firebase_manager.is_initialized()
-        
         return {
-            "status": "healthy" if firebase_status else "degraded",
+            "status": "healthy" if firebase_initialized else "degraded",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "environment": settings.ENVIRONMENT,
             "version": "1.0.0",
-            "firebase_connected": firebase_status
+            "firebase_connected": firebase_initialized
         }
     except Exception as e:
         logger.error(f"Health check error: {e}")
@@ -191,39 +272,55 @@ async def get_app_info():
 # Auth routes
 @app.post("/api/auth/verify")
 async def verify_token(current_user: dict = Depends(get_current_user)):
-    """Verify Firebase token"""
+    """Verify Firebase token and create/update user data"""
     try:
         user_id = current_user['uid']
         email = current_user.get('email')
         
-        # Get or create user data
-        user_data = firebase_manager.get_user_data(user_id)
+        if not firebase_initialized or not firebase_db:
+            raise HTTPException(status_code=500, detail="Database service unavailable")
         
-        if not user_data:
-            logger.info(f"Creating user data for new user: {user_id}")
-            from datetime import datetime, timedelta
+        # Get or create user data
+        try:
+            user_ref = firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
             
-            # Calculate trial expiry (7 days from now)
-            trial_expiry = datetime.now() + timedelta(days=7)
-            
+            if not user_data:
+                logger.info(f"Creating user data for new user: {user_id}")
+                
+                # Calculate trial expiry (7 days from now)
+                trial_expiry = datetime.now(timezone.utc) + timedelta(days=7)
+                
+                user_data = {
+                    "email": email,
+                    "created_at": firebase_db.reference().server_timestamp,
+                    "last_login": firebase_db.reference().server_timestamp,
+                    "subscription_status": "trial",
+                    "subscription_expiry": trial_expiry.isoformat(),
+                    "api_keys_set": False,
+                    "bot_active": False,
+                    "total_trades": 0,
+                    "total_pnl": 0.0,
+                    "role": "user"
+                }
+                user_ref.set(user_data)
+                logger.info(f"User data created for: {user_id}")
+            else:
+                # Update last login
+                user_ref.update({
+                    "last_login": firebase_db.reference().server_timestamp
+                })
+                logger.info(f"Last login updated for: {user_id}")
+        
+        except Exception as db_error:
+            logger.error(f"Database operation failed: {db_error}")
+            # Return basic user info even if database fails
             user_data = {
                 "email": email,
-                "created_at": firebase_manager.get_server_timestamp(),
-                "last_login": firebase_manager.get_server_timestamp(),
                 "subscription_status": "trial",
-                "subscription_expiry": trial_expiry.isoformat(),
                 "api_keys_set": False,
-                "bot_active": False,
-                "total_trades": 0,
-                "total_pnl": 0.0,
-                "role": "user"
+                "bot_active": False
             }
-            firebase_manager.update_user_data(user_id, user_data)
-        else:
-            # Update last login
-            firebase_manager.update_user_data(user_id, {
-                "last_login": firebase_manager.get_server_timestamp()
-            })
         
         return {
             "success": True,
@@ -243,43 +340,95 @@ async def get_user_profile(current_user: dict = Depends(get_current_user)):
     """Get user profile"""
     try:
         user_id = current_user['uid']
-        user_data = firebase_manager.get_user_data(user_id)
+        email = current_user.get('email')
         
-        if not user_data:
-            raise HTTPException(status_code=404, detail="User not found")
+        if not firebase_initialized or not firebase_db:
+            # Return basic profile if Firebase unavailable
+            return {
+                "email": email,
+                "subscription": {
+                    "status": "trial",
+                    "plan": "Deneme",
+                    "daysRemaining": 7
+                },
+                "api_keys_set": False,
+                "bot_active": False,
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "account_balance": 0.0
+            }
         
-        # Check subscription expiry
-        subscription_status = "expired"
-        days_remaining = 0
-        
-        if user_data.get('subscription_expiry'):
-            from datetime import datetime
-            expiry_date = datetime.fromisoformat(user_data['subscription_expiry'].replace('Z', '+00:00'))
-            now = datetime.now(timezone.utc)
-            days_remaining = (expiry_date - now).days
+        try:
+            user_ref = firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
             
-            if days_remaining > 0:
-                subscription_status = user_data.get('subscription_status', 'trial')
-            else:
-                subscription_status = "expired"
-        
-        profile = {
-            "email": user_data.get("email"),
-            "full_name": user_data.get("full_name"),
-            "subscription": {
-                "status": subscription_status,
-                "plan": "Premium" if subscription_status == "active" else "Deneme",
-                "expiryDate": user_data.get("subscription_expiry"),
-                "daysRemaining": max(0, days_remaining)
-            },
-            "api_keys_set": user_data.get("api_keys_set", False),
-            "bot_active": user_data.get("bot_active", False),
-            "total_trades": user_data.get("total_trades", 0),
-            "total_pnl": user_data.get("total_pnl", 0.0),
-            "account_balance": user_data.get("account_balance", 0.0)
-        }
-        
-        return profile
+            if not user_data:
+                # Create basic user data
+                trial_expiry = datetime.now(timezone.utc) + timedelta(days=7)
+                user_data = {
+                    "email": email,
+                    "subscription_status": "trial",
+                    "subscription_expiry": trial_expiry.isoformat(),
+                    "api_keys_set": False,
+                    "bot_active": False,
+                    "total_trades": 0,
+                    "total_pnl": 0.0
+                }
+                user_ref.set(user_data)
+            
+            # Check subscription expiry
+            subscription_status = "expired"
+            days_remaining = 0
+            
+            if user_data.get('subscription_expiry'):
+                try:
+                    expiry_date = datetime.fromisoformat(user_data['subscription_expiry'].replace('Z', '+00:00'))
+                    now = datetime.now(timezone.utc)
+                    days_remaining = (expiry_date - now).days
+                    
+                    if days_remaining > 0:
+                        subscription_status = user_data.get('subscription_status', 'trial')
+                    else:
+                        subscription_status = "expired"
+                except Exception as date_error:
+                    logger.error(f"Date parsing error: {date_error}")
+                    subscription_status = "trial"
+                    days_remaining = 7
+            
+            profile = {
+                "email": user_data.get("email", email),
+                "full_name": user_data.get("full_name"),
+                "subscription": {
+                    "status": subscription_status,
+                    "plan": "Premium" if subscription_status == "active" else "Deneme",
+                    "expiryDate": user_data.get("subscription_expiry"),
+                    "daysRemaining": max(0, days_remaining)
+                },
+                "api_keys_set": user_data.get("api_keys_set", False),
+                "bot_active": user_data.get("bot_active", False),
+                "total_trades": user_data.get("total_trades", 0),
+                "total_pnl": user_data.get("total_pnl", 0.0),
+                "account_balance": user_data.get("account_balance", 0.0)
+            }
+            
+            return profile
+            
+        except Exception as db_error:
+            logger.error(f"Database error in profile: {db_error}")
+            # Return basic profile if database fails
+            return {
+                "email": email,
+                "subscription": {
+                    "status": "trial",
+                    "plan": "Deneme",
+                    "daysRemaining": 7
+                },
+                "api_keys_set": False,
+                "bot_active": False,
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "account_balance": 0.0
+            }
         
     except HTTPException:
         raise
@@ -292,7 +441,6 @@ async def get_account_data(current_user: dict = Depends(get_current_user)):
     """Get account data"""
     try:
         user_id = current_user['uid']
-        user_data = firebase_manager.get_user_data(user_id)
         
         # Default values
         account_data = {
@@ -302,49 +450,58 @@ async def get_account_data(current_user: dict = Depends(get_current_user)):
             "message": "API keys required"
         }
         
-        # If API keys exist, get real Binance data
-        if user_data and user_data.get('api_keys_set'):
-            try:
-                from app.utils.crypto import decrypt_data
-                from app.binance_client import BinanceClient
-                
-                encrypted_api_key = user_data.get('binance_api_key')
-                encrypted_api_secret = user_data.get('binance_api_secret')
-                
-                if encrypted_api_key and encrypted_api_secret:
-                    api_key = decrypt_data(encrypted_api_key)
-                    api_secret = decrypt_data(encrypted_api_secret)
+        if not firebase_initialized or not firebase_db:
+            return account_data
+        
+        try:
+            user_ref = firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
+            
+            # If API keys exist, get real Binance data
+            if user_data and user_data.get('api_keys_set'):
+                try:
+                    from app.utils.crypto import decrypt_data
+                    from app.binance_client import BinanceClient
                     
-                    if api_key and api_secret:
-                        client = BinanceClient(api_key, api_secret)
-                        await client.initialize()
+                    encrypted_api_key = user_data.get('binance_api_key')
+                    encrypted_api_secret = user_data.get('binance_api_secret')
+                    
+                    if encrypted_api_key and encrypted_api_secret:
+                        api_key = decrypt_data(encrypted_api_key)
+                        api_secret = decrypt_data(encrypted_api_secret)
                         
-                        balance = await client.get_account_balance(use_cache=False)
-                        
-                        account_data = {
-                            "totalBalance": balance,
-                            "availableBalance": balance,
-                            "unrealizedPnl": 0.0,
-                            "message": "Real Binance data"
-                        }
-                        
-                        # Update cache
-                        firebase_manager.update_user_data(user_id, {
-                            "account_balance": balance,
-                            "last_balance_update": firebase_manager.get_server_timestamp()
-                        })
-                        
-                        await client.close()
-                        
-            except Exception as e:
-                logger.error(f"Error getting real account data: {e}")
-                # Use cached data
-                account_data = {
-                    "totalBalance": user_data.get("account_balance", 0.0),
-                    "availableBalance": user_data.get("account_balance", 0.0),
-                    "unrealizedPnl": 0.0,
-                    "message": f"Cached data (API error: {str(e)})"
-                }
+                        if api_key and api_secret:
+                            client = BinanceClient(api_key, api_secret)
+                            await client.initialize()
+                            
+                            balance = await client.get_account_balance(use_cache=False)
+                            
+                            account_data = {
+                                "totalBalance": balance,
+                                "availableBalance": balance,
+                                "unrealizedPnl": 0.0,
+                                "message": "Real Binance data"
+                            }
+                            
+                            # Update cache
+                            user_ref.update({
+                                "account_balance": balance,
+                                "last_balance_update": firebase_db.reference().server_timestamp
+                            })
+                            
+                            await client.close()
+                            
+                except Exception as e:
+                    logger.error(f"Error getting real account data: {e}")
+                    # Use cached data
+                    account_data = {
+                        "totalBalance": user_data.get("account_balance", 0.0),
+                        "availableBalance": user_data.get("account_balance", 0.0),
+                        "unrealizedPnl": 0.0,
+                        "message": f"Cached data (API error: {str(e)})"
+                    }
+        except Exception as db_error:
+            logger.error(f"Database error in account: {db_error}")
         
         return account_data
         
@@ -359,46 +516,53 @@ async def get_user_positions(current_user: dict = Depends(get_current_user)):
     """Get user positions"""
     try:
         user_id = current_user['uid']
-        user_data = firebase_manager.get_user_data(user_id)
-        
         positions = []
         
-        if user_data and user_data.get('api_keys_set'):
-            try:
-                from app.utils.crypto import decrypt_data
-                from app.binance_client import BinanceClient
-                
-                encrypted_api_key = user_data.get('binance_api_key')
-                encrypted_api_secret = user_data.get('binance_api_secret')
-                
-                if encrypted_api_key and encrypted_api_secret:
-                    api_key = decrypt_data(encrypted_api_key)
-                    api_secret = decrypt_data(encrypted_api_secret)
+        if not firebase_initialized or not firebase_db:
+            return positions
+        
+        try:
+            user_ref = firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
+            
+            if user_data and user_data.get('api_keys_set'):
+                try:
+                    from app.utils.crypto import decrypt_data
+                    from app.binance_client import BinanceClient
                     
-                    if api_key and api_secret:
-                        client = BinanceClient(api_key, api_secret)
-                        await client.initialize()
+                    encrypted_api_key = user_data.get('binance_api_key')
+                    encrypted_api_secret = user_data.get('binance_api_secret')
+                    
+                    if encrypted_api_key and encrypted_api_secret:
+                        api_key = decrypt_data(encrypted_api_key)
+                        api_secret = decrypt_data(encrypted_api_secret)
                         
-                        # Get all positions
-                        all_positions = await client.client.futures_position_information()
-                        
-                        for pos in all_positions:
-                            position_amt = float(pos['positionAmt'])
-                            if position_amt != 0:
-                                positions.append({
-                                    "symbol": pos['symbol'],
-                                    "positionSide": "LONG" if position_amt > 0 else "SHORT",
-                                    "positionAmt": str(abs(position_amt)),
-                                    "entryPrice": pos['entryPrice'],
-                                    "markPrice": pos['markPrice'],
-                                    "unrealizedPnl": float(pos['unRealizedProfit']),
-                                    "percentage": float(pos['percentage'])
-                                })
-                        
-                        await client.close()
-                        
-            except Exception as e:
-                logger.error(f"Error getting positions: {e}")
+                        if api_key and api_secret:
+                            client = BinanceClient(api_key, api_secret)
+                            await client.initialize()
+                            
+                            # Get all positions
+                            all_positions = await client.client.futures_position_information()
+                            
+                            for pos in all_positions:
+                                position_amt = float(pos['positionAmt'])
+                                if position_amt != 0:
+                                    positions.append({
+                                        "symbol": pos['symbol'],
+                                        "positionSide": "LONG" if position_amt > 0 else "SHORT",
+                                        "positionAmt": str(abs(position_amt)),
+                                        "entryPrice": pos['entryPrice'],
+                                        "markPrice": pos['markPrice'],
+                                        "unrealizedPnl": float(pos['unRealizedProfit']),
+                                        "percentage": float(pos['percentage'])
+                                    })
+                            
+                            await client.close()
+                            
+                except Exception as e:
+                    logger.error(f"Error getting positions: {e}")
+        except Exception as db_error:
+            logger.error(f"Database error in positions: {db_error}")
         
         return positions
         
@@ -413,37 +577,40 @@ async def get_recent_trades(current_user: dict = Depends(get_current_user), limi
     """Get recent trades"""
     try:
         user_id = current_user['uid']
-        
         trades = []
         
-        # Get from Firebase first
+        if not firebase_initialized or not firebase_db:
+            return trades
+        
         try:
-            if firebase_manager.is_initialized():
-                trades_ref = firebase_manager.db.reference('trades')
-                query = trades_ref.order_by_child('user_id').equal_to(user_id).limit_to_last(limit)
-                snapshot = query.get()
-                
-                if snapshot:
-                    for trade_id, trade_data in snapshot.items():
-                        trades.append({
-                            "id": trade_id,
-                            "symbol": trade_data.get("symbol"),
-                            "side": trade_data.get("side"),
-                            "quantity": trade_data.get("quantity", 0),
-                            "price": trade_data.get("price", 0),
-                            "quoteQty": trade_data.get("quote_qty", 0),
-                            "pnl": trade_data.get("pnl", 0),
-                            "status": trade_data.get("status"),
-                            "time": trade_data.get("timestamp")
-                        })
-        except Exception as e:
-            logger.warning(f"Firebase trades fetch failed: {e}")
+            # Get from Firebase first
+            trades_ref = firebase_db.reference('trades')
+            query = trades_ref.order_by_child('user_id').equal_to(user_id).limit_to_last(limit)
+            snapshot = query.get()
+            
+            if snapshot:
+                for trade_id, trade_data in snapshot.items():
+                    trades.append({
+                        "id": trade_id,
+                        "symbol": trade_data.get("symbol"),
+                        "side": trade_data.get("side"),
+                        "quantity": trade_data.get("quantity", 0),
+                        "price": trade_data.get("price", 0),
+                        "quoteQty": trade_data.get("quote_qty", 0),
+                        "pnl": trade_data.get("pnl", 0),
+                        "status": trade_data.get("status"),
+                        "time": trade_data.get("timestamp")
+                    })
+        except Exception as db_error:
+            logger.error(f"Database error in trades: {db_error}")
         
         # If no Firebase data, try Binance
         if not trades:
-            user_data = firebase_manager.get_user_data(user_id)
-            if user_data and user_data.get('api_keys_set'):
-                try:
+            try:
+                user_ref = firebase_db.reference(f'users/{user_id}')
+                user_data = user_ref.get()
+                
+                if user_data and user_data.get('api_keys_set'):
                     from app.utils.crypto import decrypt_data
                     from app.binance_client import BinanceClient
                     
@@ -475,9 +642,8 @@ async def get_recent_trades(current_user: dict = Depends(get_current_user), limi
                                 })
                             
                             await client.close()
-                            
-                except Exception as e:
-                    logger.error(f"Binance trades fetch failed: {e}")
+            except Exception as binance_error:
+                logger.error(f"Binance trades fetch failed: {binance_error}")
         
         # Sort by time
         trades.sort(key=lambda x: x.get("time", 0), reverse=True)
@@ -517,23 +683,31 @@ async def save_api_keys(request: dict, current_user: dict = Depends(get_current_
             logger.error(f"API test failed: {e}")
             raise HTTPException(status_code=400, detail=f"Invalid API keys: {str(e)}")
         
+        if not firebase_initialized or not firebase_db:
+            raise HTTPException(status_code=500, detail="Database service unavailable")
+        
         # Encrypt and save
-        from app.utils.crypto import encrypt_data
-        encrypted_api_key = encrypt_data(api_key)
-        encrypted_api_secret = encrypt_data(api_secret)
-        
-        api_data = {
-            "binance_api_key": encrypted_api_key,
-            "binance_api_secret": encrypted_api_secret,
-            "api_testnet": testnet,
-            "api_keys_set": True,
-            "api_updated_at": firebase_manager.get_server_timestamp(),
-            "account_balance": balance
-        }
-        
-        success = firebase_manager.update_user_data(user_id, api_data)
-        
-        if not success:
+        try:
+            from app.utils.crypto import encrypt_data
+            encrypted_api_key = encrypt_data(api_key)
+            encrypted_api_secret = encrypt_data(api_secret)
+            
+            api_data = {
+                "binance_api_key": encrypted_api_key,
+                "binance_api_secret": encrypted_api_secret,
+                "api_testnet": testnet,
+                "api_keys_set": True,
+                "api_updated_at": firebase_db.reference().server_timestamp,
+                "account_balance": balance
+            }
+            
+            user_ref = firebase_db.reference(f'users/{user_id}')
+            user_ref.update(api_data)
+            
+            logger.info(f"API keys saved for user: {user_id}")
+            
+        except Exception as save_error:
+            logger.error(f"API keys save error: {save_error}")
             raise HTTPException(status_code=500, detail="API keys could not be saved")
         
         return {
@@ -553,66 +727,83 @@ async def get_api_status(current_user: dict = Depends(get_current_user)):
     """Check API status"""
     try:
         user_id = current_user['uid']
-        user_data = firebase_manager.get_user_data(user_id)
         
-        if not user_data:
+        if not firebase_initialized or not firebase_db:
             return {
                 "hasApiKeys": False,
                 "isConnected": False,
-                "message": "User data not found"
+                "message": "Database service unavailable"
             }
         
-        has_api_keys = user_data.get('api_keys_set', False)
-        
-        if not has_api_keys:
-            return {
-                "hasApiKeys": False,
-                "isConnected": False,
-                "message": "API keys not configured"
-            }
-        
-        # Test API connection
         try:
-            from app.utils.crypto import decrypt_data
-            from app.binance_client import BinanceClient
+            user_ref = firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
             
-            encrypted_api_key = user_data.get('binance_api_key')
-            encrypted_api_secret = user_data.get('binance_api_secret')
-            
-            if encrypted_api_key and encrypted_api_secret:
-                api_key = decrypt_data(encrypted_api_key)
-                api_secret = decrypt_data(encrypted_api_secret)
-                
-                if api_key and api_secret:
-                    test_client = BinanceClient(api_key, api_secret)
-                    await test_client.initialize()
-                    balance = await test_client.get_account_balance(use_cache=True)
-                    await test_client.close()
-                    
-                    return {
-                        "hasApiKeys": True,
-                        "isConnected": True,
-                        "message": f"API keys active - Balance: {balance} USDT"
-                    }
-                else:
-                    return {
-                        "hasApiKeys": True,
-                        "isConnected": False,
-                        "message": "Invalid API key format"
-                    }
-            else:
+            if not user_data:
                 return {
                     "hasApiKeys": False,
                     "isConnected": False,
-                    "message": "API keys not found"
+                    "message": "User data not found"
                 }
+            
+            has_api_keys = user_data.get('api_keys_set', False)
+            
+            if not has_api_keys:
+                return {
+                    "hasApiKeys": False,
+                    "isConnected": False,
+                    "message": "API keys not configured"
+                }
+            
+            # Test API connection
+            try:
+                from app.utils.crypto import decrypt_data
+                from app.binance_client import BinanceClient
                 
-        except Exception as e:
-            logger.error(f"API test error: {e}")
+                encrypted_api_key = user_data.get('binance_api_key')
+                encrypted_api_secret = user_data.get('binance_api_secret')
+                
+                if encrypted_api_key and encrypted_api_secret:
+                    api_key = decrypt_data(encrypted_api_key)
+                    api_secret = decrypt_data(encrypted_api_secret)
+                    
+                    if api_key and api_secret:
+                        test_client = BinanceClient(api_key, api_secret)
+                        await test_client.initialize()
+                        balance = await test_client.get_account_balance(use_cache=True)
+                        await test_client.close()
+                        
+                        return {
+                            "hasApiKeys": True,
+                            "isConnected": True,
+                            "message": f"API keys active - Balance: {balance} USDT"
+                        }
+                    else:
+                        return {
+                            "hasApiKeys": True,
+                            "isConnected": False,
+                            "message": "Invalid API key format"
+                        }
+                else:
+                    return {
+                        "hasApiKeys": False,
+                        "isConnected": False,
+                        "message": "API keys not found"
+                    }
+                    
+            except Exception as e:
+                logger.error(f"API test error: {e}")
+                return {
+                    "hasApiKeys": True,
+                    "isConnected": False,
+                    "message": f"API test error: {str(e)}"
+                }
+        except Exception as db_error:
+            logger.error(f"Database error in API status: {db_error}")
             return {
-                "hasApiKeys": True,
+                "hasApiKeys": False,
                 "isConnected": False,
-                "message": f"API test error: {str(e)}"
+                "message": "Database error"
             }
         
     except HTTPException:
@@ -626,36 +817,53 @@ async def get_api_info(current_user: dict = Depends(get_current_user)):
     """Get API info (masked)"""
     try:
         user_id = current_user['uid']
-        user_data = firebase_manager.get_user_data(user_id)
         
-        if not user_data:
+        if not firebase_initialized or not firebase_db:
             return {
                 "hasKeys": False,
                 "maskedApiKey": None,
                 "useTestnet": False
             }
         
-        has_keys = user_data.get('api_keys_set', False)
-        
-        if has_keys:
-            encrypted_api_key = user_data.get('binance_api_key')
-            masked_key = None
+        try:
+            user_ref = firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
             
-            if encrypted_api_key:
-                try:
-                    from app.utils.crypto import decrypt_data
-                    api_key = decrypt_data(encrypted_api_key)
-                    if api_key and len(api_key) >= 8:
-                        masked_key = api_key[:8] + "..." + api_key[-4:]
-                except:
-                    masked_key = "Encrypted API Key"
+            if not user_data:
+                return {
+                    "hasKeys": False,
+                    "maskedApiKey": None,
+                    "useTestnet": False
+                }
             
-            return {
-                "hasKeys": True,
-                "maskedApiKey": masked_key,
-                "useTestnet": user_data.get('api_testnet', False)
-            }
-        else:
+            has_keys = user_data.get('api_keys_set', False)
+            
+            if has_keys:
+                encrypted_api_key = user_data.get('binance_api_key')
+                masked_key = None
+                
+                if encrypted_api_key:
+                    try:
+                        from app.utils.crypto import decrypt_data
+                        api_key = decrypt_data(encrypted_api_key)
+                        if api_key and len(api_key) >= 8:
+                            masked_key = api_key[:8] + "..." + api_key[-4:]
+                    except:
+                        masked_key = "Encrypted API Key"
+                
+                return {
+                    "hasKeys": True,
+                    "maskedApiKey": masked_key,
+                    "useTestnet": user_data.get('api_testnet', False)
+                }
+            else:
+                return {
+                    "hasKeys": False,
+                    "maskedApiKey": None,
+                    "useTestnet": False
+                }
+        except Exception as db_error:
+            logger.error(f"Database error in API info: {db_error}")
             return {
                 "hasKeys": False,
                 "maskedApiKey": None,
@@ -676,57 +884,69 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
         user_id = current_user['uid']
         logger.info(f"Bot start request from user: {user_id}")
         
+        if not firebase_initialized or not firebase_db:
+            raise HTTPException(status_code=500, detail="Database service unavailable")
+        
         # Check subscription
-        user_data = firebase_manager.get_user_data(user_id)
-        if not user_data:
-            raise HTTPException(status_code=404, detail="User data not found")
-        
-        # Check subscription expiry
-        subscription_status = user_data.get('subscription_status')
-        if user_data.get('subscription_expiry'):
-            from datetime import datetime
-            expiry_date = datetime.fromisoformat(user_data['subscription_expiry'].replace('Z', '+00:00'))
-            now = datetime.now(timezone.utc)
+        try:
+            user_ref = firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
             
-            if now > expiry_date:
-                raise HTTPException(status_code=403, detail="Subscription expired")
-        
-        if subscription_status not in ['trial', 'active']:
-            raise HTTPException(status_code=403, detail="Active subscription required")
-        
-        # Check API keys
-        if not user_data.get('api_keys_set'):
-            raise HTTPException(status_code=400, detail="Please add your API keys first")
-        
-        # Start bot (simplified for now)
-        from app.bot_manager import bot_manager, StartRequest
-        
-        bot_settings = StartRequest(
-            symbol=request.get('symbol', 'BTCUSDT'),
-            timeframe=request.get('timeframe', '15m'),
-            leverage=request.get('leverage', 10),
-            order_size=request.get('order_size', 35.0),
-            stop_loss=request.get('stop_loss', 2.0),
-            take_profit=request.get('take_profit', 4.0)
-        )
-        
-        result = await bot_manager.start_bot_for_user(user_id, bot_settings)
-        
-        if "error" in result:
-            raise HTTPException(status_code=400, detail=result["error"])
-        
-        # Update user data
-        firebase_manager.update_user_data(user_id, {
-            "bot_active": True,
-            "bot_symbol": request.get('symbol', 'BTCUSDT'),
-            "bot_start_time": firebase_manager.get_server_timestamp()
-        })
-        
-        return {
-            "success": True,
-            "message": "Bot started successfully",
-            "bot_status": result.get("status", {})
-        }
+            if not user_data:
+                raise HTTPException(status_code=404, detail="User data not found")
+            
+            # Check subscription expiry
+            subscription_status = user_data.get('subscription_status')
+            if user_data.get('subscription_expiry'):
+                try:
+                    expiry_date = datetime.fromisoformat(user_data['subscription_expiry'].replace('Z', '+00:00'))
+                    now = datetime.now(timezone.utc)
+                    
+                    if now > expiry_date:
+                        raise HTTPException(status_code=403, detail="Subscription expired")
+                except Exception as date_error:
+                    logger.error(f"Date parsing error: {date_error}")
+                    # Continue with trial if date parsing fails
+            
+            if subscription_status not in ['trial', 'active']:
+                raise HTTPException(status_code=403, detail="Active subscription required")
+            
+            # Check API keys
+            if not user_data.get('api_keys_set'):
+                raise HTTPException(status_code=400, detail="Please add your API keys first")
+            
+            # Start bot (simplified for now)
+            from app.bot_manager import bot_manager, StartRequest
+            
+            bot_settings = StartRequest(
+                symbol=request.get('symbol', 'BTCUSDT'),
+                timeframe=request.get('timeframe', '15m'),
+                leverage=request.get('leverage', 10),
+                order_size=request.get('order_size', 35.0),
+                stop_loss=request.get('stop_loss', 2.0),
+                take_profit=request.get('take_profit', 4.0)
+            )
+            
+            result = await bot_manager.start_bot_for_user(user_id, bot_settings)
+            
+            if "error" in result:
+                raise HTTPException(status_code=400, detail=result["error"])
+            
+            # Update user data
+            user_ref.update({
+                "bot_active": True,
+                "bot_symbol": request.get('symbol', 'BTCUSDT'),
+                "bot_start_time": firebase_db.reference().server_timestamp
+            })
+            
+            return {
+                "success": True,
+                "message": "Bot started successfully",
+                "bot_status": result.get("status", {})
+            }
+        except Exception as db_error:
+            logger.error(f"Database error in bot start: {db_error}")
+            raise HTTPException(status_code=500, detail="Bot start failed due to database error")
         
     except HTTPException:
         raise
@@ -748,10 +968,15 @@ async def stop_bot(current_user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=400, detail=result["error"])
         
         # Update user data
-        firebase_manager.update_user_data(user_id, {
-            "bot_active": False,
-            "bot_stop_time": firebase_manager.get_server_timestamp()
-        })
+        if firebase_initialized and firebase_db:
+            try:
+                user_ref = firebase_db.reference(f'users/{user_id}')
+                user_ref.update({
+                    "bot_active": False,
+                    "bot_stop_time": firebase_db.reference().server_timestamp
+                })
+            except Exception as db_error:
+                logger.error(f"Database update error: {db_error}")
         
         return {
             "success": True,
@@ -789,61 +1014,78 @@ async def get_bot_api_status(current_user: dict = Depends(get_current_user)):
     """Get API status for bot"""
     try:
         user_id = current_user['uid']
-        user_data = firebase_manager.get_user_data(user_id)
         
-        if not user_data:
+        if not firebase_initialized or not firebase_db:
             return {
                 "hasApiKeys": False,
                 "isConnected": False,
-                "message": "User data not found"
+                "message": "Database service unavailable"
             }
         
-        has_api_keys = user_data.get('api_keys_set', False)
-        
-        if not has_api_keys:
-            return {
-                "hasApiKeys": False,
-                "isConnected": False,
-                "message": "API keys not configured"
-            }
-        
-        # Test connection
         try:
-            from app.utils.crypto import decrypt_data
-            from app.binance_client import BinanceClient
+            user_ref = firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
             
-            encrypted_api_key = user_data.get('binance_api_key')
-            encrypted_api_secret = user_data.get('binance_api_secret')
-            
-            if encrypted_api_key and encrypted_api_secret:
-                api_key = decrypt_data(encrypted_api_key)
-                api_secret = decrypt_data(encrypted_api_secret)
-                
-                if api_key and api_secret:
-                    return {
-                        "hasApiKeys": True,
-                        "isConnected": True,
-                        "message": "API keys active"
-                    }
-                else:
-                    return {
-                        "hasApiKeys": True,
-                        "isConnected": False,
-                        "message": "Invalid API key format"
-                    }
-            else:
+            if not user_data:
                 return {
                     "hasApiKeys": False,
                     "isConnected": False,
-                    "message": "API keys not found"
+                    "message": "User data not found"
                 }
+            
+            has_api_keys = user_data.get('api_keys_set', False)
+            
+            if not has_api_keys:
+                return {
+                    "hasApiKeys": False,
+                    "isConnected": False,
+                    "message": "API keys not configured"
+                }
+            
+            # Test connection
+            try:
+                from app.utils.crypto import decrypt_data
+                from app.binance_client import BinanceClient
                 
-        except Exception as e:
-            logger.error(f"API test error: {e}")
+                encrypted_api_key = user_data.get('binance_api_key')
+                encrypted_api_secret = user_data.get('binance_api_secret')
+                
+                if encrypted_api_key and encrypted_api_secret:
+                    api_key = decrypt_data(encrypted_api_key)
+                    api_secret = decrypt_data(encrypted_api_secret)
+                    
+                    if api_key and api_secret:
+                        return {
+                            "hasApiKeys": True,
+                            "isConnected": True,
+                            "message": "API keys active"
+                        }
+                    else:
+                        return {
+                            "hasApiKeys": True,
+                            "isConnected": False,
+                            "message": "Invalid API key format"
+                        }
+                else:
+                    return {
+                        "hasApiKeys": False,
+                        "isConnected": False,
+                        "message": "API keys not found"
+                    }
+                    
+            except Exception as e:
+                logger.error(f"API test error: {e}")
+                return {
+                    "hasApiKeys": True,
+                    "isConnected": False,
+                    "message": f"API test error: {str(e)}"
+                }
+        except Exception as db_error:
+            logger.error(f"Database error in bot API status: {db_error}")
             return {
-                "hasApiKeys": True,
+                "hasApiKeys": False,
                 "isConnected": False,
-                "message": f"API test error: {str(e)}"
+                "message": "Database error"
             }
         
     except HTTPException:
