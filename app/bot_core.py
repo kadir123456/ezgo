@@ -519,7 +519,7 @@ class BotCore:
                 "account_balance": self.status["account_balance"],
                 "current_price": self.current_price,
                 "symbol_validated": self.symbol_validated,
-                "last_bot_update": firestore.SERVER_TIMESTAMP  # Düzeltme
+                "last_bot_update": db.ServerValue.TIMESTAMP  # Düzeltme
             }
             
             user_ref = firebase_db.reference(f'users/{self.user_id}')
