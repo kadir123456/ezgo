@@ -22,7 +22,7 @@ async def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] =
     
     try:
         decoded_token = firebase_auth.verify_id_token(credentials.credentials)
-        logger.info(f"User authenticated: {decoded_token['uid']}")
+        logger.info(f"✅ Token verified for user: {decoded_token['uid']}")
         return decoded_token
     except Exception as e:
         logger.error(f"Token verification failed: {e}")
@@ -84,6 +84,7 @@ async def get_user_profile(current_user: dict = Depends(get_current_user)):
 @router.get("/account")
 async def get_account_data(current_user: dict = Depends(get_current_user)):
     """Kullanıcının hesap verilerini getir"""
+    client = None
     try:
         user_id = current_user['uid']
         user_data = firebase_manager.get_user_data(user_id)
@@ -134,7 +135,6 @@ async def get_account_data(current_user: dict = Depends(get_current_user)):
                             "last_balance_update": firebase_manager.get_server_timestamp()
                         })
                         
-                        await client.close()
                         logger.info(f"Real account data loaded for user: {user_id}")
                         
             except Exception as e:
@@ -154,6 +154,13 @@ async def get_account_data(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Account data fetch error: {e}")
         raise HTTPException(status_code=500, detail="Hesap verileri alınamadı")
+    finally:
+        # FIX: Client'ı her durumda kapat
+        if client:
+            try:
+                await client.close()
+            except Exception as close_error:
+                logger.error(f"Client close error: {close_error}")
 
 @router.get("/stats")
 async def get_user_stats(current_user: dict = Depends(get_current_user)):
@@ -191,7 +198,8 @@ async def get_user_stats(current_user: dict = Depends(get_current_user)):
 
 @router.get("/positions")
 async def get_user_positions(current_user: dict = Depends(get_current_user)):
-    """Kullanıcının açık pozisyonlarını getir"""
+    """Kullanıcının açık pozisyonlarını getir - FIX: percentage hatası düzeltildi"""
+    client = None
     try:
         user_id = current_user['uid']
         user_data = firebase_manager.get_user_data(user_id)
@@ -219,6 +227,17 @@ async def get_user_positions(current_user: dict = Depends(get_current_user)):
                         for pos in all_positions:
                             position_amt = float(pos['positionAmt'])
                             if position_amt != 0:  # Sadece açık pozisyonlar
+                                # FIX: Percentage'ı güvenli şekilde hesapla
+                                entry_price = float(pos['entryPrice'])
+                                mark_price = float(pos['markPrice'])
+                                percentage = 0.0
+                                
+                                if entry_price > 0:
+                                    if position_amt > 0:  # Long pozisyon
+                                        percentage = ((mark_price - entry_price) / entry_price) * 100
+                                    else:  # Short pozisyon
+                                        percentage = ((entry_price - mark_price) / entry_price) * 100
+                                
                                 positions.append({
                                     "symbol": pos['symbol'],
                                     "positionSide": "LONG" if position_amt > 0 else "SHORT",
@@ -226,10 +245,9 @@ async def get_user_positions(current_user: dict = Depends(get_current_user)):
                                     "entryPrice": pos['entryPrice'],
                                     "markPrice": pos['markPrice'],
                                     "unrealizedPnl": float(pos['unRealizedProfit']),
-                                    "percentage": float(pos['percentage'])
+                                    "percentage": round(percentage, 2)  # FIX: Manuel hesaplama
                                 })
                         
-                        await client.close()
                         logger.info(f"Real positions loaded for user: {user_id}")
                         
             except Exception as e:
@@ -242,6 +260,13 @@ async def get_user_positions(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Positions fetch error: {e}")
         raise HTTPException(status_code=500, detail="Pozisyonlar alınamadı")
+    finally:
+        # FIX: Client'ı her durumda kapat
+        if client:
+            try:
+                await client.close()
+            except Exception as close_error:
+                logger.error(f"Client close error: {close_error}")
 
 @router.get("/recent-trades")
 async def get_recent_trades(
@@ -249,6 +274,7 @@ async def get_recent_trades(
     limit: int = 10
 ):
     """Kullanıcının son işlemlerini getir"""
+    client = None
     try:
         user_id = current_user['uid']
         user_data = firebase_manager.get_user_data(user_id)
@@ -309,7 +335,6 @@ async def get_recent_trades(
                                 "time": trade['time']
                             })
                         
-                        await client.close()
                         logger.info(f"Binance trades loaded for user: {user_id}")
                         
             except Exception as e:
@@ -325,6 +350,13 @@ async def get_recent_trades(
     except Exception as e:
         logger.error(f"Recent trades fetch error: {e}")
         raise HTTPException(status_code=500, detail="Son işlemler alınamadı")
+    finally:
+        # FIX: Client'ı her durumda kapat
+        if client:
+            try:
+                await client.close()
+            except Exception as close_error:
+                logger.error(f"Client close error: {close_error}")
 
 @router.post("/api-keys")
 async def save_api_keys(
@@ -332,6 +364,7 @@ async def save_api_keys(
     current_user: dict = Depends(get_current_user)
 ):
     """Kullanıcının API anahtarlarını kaydet"""
+    test_client = None
     try:
         user_id = current_user['uid']
         logger.info(f"API keys save request from user: {user_id}")
@@ -344,8 +377,6 @@ async def save_api_keys(
             # Test balance call
             balance = await test_client.get_account_balance(use_cache=False)
             logger.info(f"API test successful for user {user_id}, balance: {balance}")
-            
-            await test_client.close()
             
         except Exception as e:
             logger.error(f"API test failed for user {user_id}: {e}")
@@ -384,10 +415,18 @@ async def save_api_keys(
     except Exception as e:
         logger.error(f"API keys save error: {e}")
         raise HTTPException(status_code=500, detail=f"API anahtarları kaydedilemedi: {str(e)}")
+    finally:
+        # FIX: Test client'ı her durumda kapat
+        if test_client:
+            try:
+                await test_client.close()
+            except Exception as close_error:
+                logger.error(f"Test client close error: {close_error}")
 
 @router.get("/api-status")
 async def get_api_status(current_user: dict = Depends(get_current_user)):
     """Kullanıcının API durumunu kontrol et"""
+    test_client = None
     try:
         user_id = current_user['uid']
         user_data = firebase_manager.get_user_data(user_id)
@@ -422,7 +461,6 @@ async def get_api_status(current_user: dict = Depends(get_current_user)):
                     test_client = BinanceClient(api_key, api_secret)
                     await test_client.initialize()
                     balance = await test_client.get_account_balance(use_cache=True)
-                    await test_client.close()
                     
                     return {
                         "hasApiKeys": True,
@@ -455,6 +493,13 @@ async def get_api_status(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"API status check error: {e}")
         raise HTTPException(status_code=500, detail=f"API durumu kontrol edilemedi: {str(e)}")
+    finally:
+        # FIX: Test client'ı her durumda kapat
+        if test_client:
+            try:
+                await test_client.close()
+            except Exception as close_error:
+                logger.error(f"Test client close error: {close_error}")
 
 @router.get("/api-info")
 async def get_api_info(current_user: dict = Depends(get_current_user)):
@@ -509,6 +554,7 @@ async def close_position(
     current_user: dict = Depends(get_current_user)
 ):
     """Pozisyon kapatma"""
+    client = None
     try:
         user_id = current_user['uid']
         symbol = request.get('symbol')
@@ -573,8 +619,6 @@ async def close_position(
                     'last_trade_time': firebase_manager.get_server_timestamp()
                 })
                 
-                await client.close()
-                
                 return {
                     "success": True,
                     "message": "Pozisyon başarıyla kapatıldı",
@@ -592,3 +636,10 @@ async def close_position(
     except Exception as e:
         logger.error(f"Position close error: {e}")
         raise HTTPException(status_code=500, detail="Pozisyon kapatılamadı")
+    finally:
+        # FIX: Client'ı her durumda kapat
+        if client:
+            try:
+                await client.close()
+            except Exception as close_error:
+                logger.error(f"Client close error: {close_error}")
