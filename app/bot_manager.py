@@ -2,10 +2,10 @@ import asyncio
 from typing import Dict, Optional
 from app.bot_core import BotCore
 from app.binance_client import BinanceClient
-from app.firebase_manager import firebase_manager
 from app.utils.logger import get_logger
 from app.utils.crypto import decrypt_data
 from pydantic import BaseModel, Field
+import logging
 
 logger = get_logger("bot_manager")
 
@@ -40,85 +40,95 @@ class BotManager:
                 await self.stop_bot_for_user(uid)
                 await asyncio.sleep(1)  # Temizlik için bekle
 
-            # Kullanıcının API anahtarlarını Firebase'den al
-            user_data = firebase_manager.get_user_data(uid)
-            if not user_data:
-                logger.error(f"User data not found for: {uid}")
-                return {"error": "Kullanıcı verisi bulunamadı."}
-            
-            # Şifrelenmiş API anahtarlarını çöz
-            encrypted_api_key = user_data.get('binance_api_key')
-            encrypted_api_secret = user_data.get('binance_api_secret')
-            
-            if not encrypted_api_key or not encrypted_api_secret:
-                logger.error(f"API keys not found for user: {uid}")
-                return {"error": "Lütfen önce Binance API anahtarlarınızı kaydedin."}
-
+            # Firebase'den kullanıcı verilerini al
             try:
-                api_key = decrypt_data(encrypted_api_key)
-                api_secret = decrypt_data(encrypted_api_secret)
+                from app.main import firebase_db, firebase_initialized
                 
-                if not api_key or not api_secret:
-                    raise Exception("API anahtarları çözülemedi")
+                if not firebase_initialized or not firebase_db:
+                    return {"error": "Database service unavailable"}
+                
+                user_ref = firebase_db.reference(f'users/{uid}')
+                user_data = user_ref.get()
+                
+                if not user_data:
+                    logger.error(f"User data not found for: {uid}")
+                    return {"error": "Kullanıcı verisi bulunamadı."}
+                
+                # Şifrelenmiş API anahtarlarını çöz
+                encrypted_api_key = user_data.get('binance_api_key')
+                encrypted_api_secret = user_data.get('binance_api_secret')
+                
+                if not encrypted_api_key or not encrypted_api_secret:
+                    logger.error(f"API keys not found for user: {uid}")
+                    return {"error": "Lütfen önce Binance API anahtarlarınızı kaydedin."}
+
+                try:
+                    api_key = decrypt_data(encrypted_api_key)
+                    api_secret = decrypt_data(encrypted_api_secret)
                     
-            except Exception as e:
-                logger.error(f"Failed to decrypt API keys for user {uid}: {e}")
-                return {"error": "API anahtarları çözülemedi. Lütfen tekrar kaydedin."}
+                    if not api_key or not api_secret:
+                        raise Exception("API anahtarları çözülemedi")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to decrypt API keys for user {uid}: {e}")
+                    return {"error": "API anahtarları çözülemedi. Lütfen tekrar kaydedin."}
 
-            # Kullanıcıya özel Binance client oluştur
-            try:
-                user_client = BinanceClient()
-                user_client.api_key = api_key
-                user_client.api_secret = api_secret
+                # Kullanıcıya özel Binance client oluştur
+                try:
+                    user_client = BinanceClient(api_key, api_secret)
+                    
+                    # Client'ı test et
+                    await user_client.initialize()
+                    test_balance = await user_client.get_account_balance(use_cache=False)
+                    logger.info(f"Binance client created and tested for user: {uid}, balance: {test_balance}")
+                    
+                    # Client'ı kaydet
+                    self.user_clients[uid] = user_client
+                    
+                except Exception as e:
+                    logger.error(f"Failed to create/test Binance client for user {uid}: {e}")
+                    return {"error": f"Binance bağlantısı kurulamadı: {str(e)}"}
                 
-                # Client'ı test et
-                await user_client.initialize()
-                test_balance = await user_client.get_account_balance(use_cache=False)
-                logger.info(f"Binance client created and tested for user: {uid}, balance: {test_balance}")
+                # Bot ayarlarını hazırla
+                bot_settings_dict = bot_settings.model_dump()
+                bot_settings_dict['user_id'] = uid
                 
-                # Client'ı kaydet
-                self.user_clients[uid] = user_client
-                
-            except Exception as e:
-                logger.error(f"Failed to create/test Binance client for user {uid}: {e}")
-                return {"error": f"Binance bağlantısı kurulamadı: {str(e)}"}
-            
-            # Bot ayarlarını hazırla
-            bot_settings_dict = bot_settings.model_dump()
-            bot_settings_dict['user_id'] = uid
-            
-            # BotCore oluştur
-            try:
-                bot = BotCore(
-                    user_id=uid,
-                    binance_client=user_client,
-                    bot_settings=bot_settings_dict
-                )
-                
-                # Botu aktif listesine ekle
-                self.active_bots[uid] = bot
-                
-                # Bot'u arka planda başlat
-                asyncio.create_task(bot.start())
-                
-                # Kısa bekleme sonrası durum döndür
-                await asyncio.sleep(1)
-                
-                logger.info(f"Bot started successfully for user: {uid}")
-                
-                return {
-                    "success": True,
-                    "message": "Bot başarıyla başlatıldı",
-                    "status": bot.get_status()
-                }
-                
-            except Exception as e:
-                logger.error(f"Failed to create BotCore for user {uid}: {e}")
-                # Hatalı client'ı temizle
-                if uid in self.user_clients:
-                    await self.user_clients[uid].close()
-                    del self.user_clients[uid]
-                return {"error": f"Bot oluşturulamadı: {str(e)}"}
+                # BotCore oluştur
+                try:
+                    bot = BotCore(
+                        user_id=uid,
+                        binance_client=user_client,
+                        bot_settings=bot_settings_dict
+                    )
+                    
+                    # Botu aktif listesine ekle
+                    self.active_bots[uid] = bot
+                    
+                    # Bot'u arka planda başlat
+                    asyncio.create_task(bot.start())
+                    
+                    # Kısa bekleme sonrası durum döndür
+                    await asyncio.sleep(1)
+                    
+                    logger.info(f"Bot started successfully for user: {uid}")
+                    
+                    return {
+                        "success": True,
+                        "message": "Bot başarıyla başlatıldı",
+                        "status": bot.get_status()
+                    }
+                    
+                except Exception as e:
+                    logger.error(f"Failed to create BotCore for user {uid}: {e}")
+                    # Hatalı client'ı temizle
+                    if uid in self.user_clients:
+                        await self.user_clients[uid].close()
+                        del self.user_clients[uid]
+                    return {"error": f"Bot oluşturulamadı: {str(e)}"}
+                    
+            except Exception as db_error:
+                logger.error(f"Database error for user {uid}: {db_error}")
+                return {"error": "Veritabanı hatası"}
 
         except Exception as e:
             logger.error(f"Unexpected error starting bot for user {uid}: {e}")
