@@ -713,22 +713,45 @@ async function openApiModal() {
     const apiModal = document.getElementById('api-modal');
     if (apiModal) {
         apiModal.classList.add('show');
+
+        // Input alanlarını ve durum göstergesini önceden temizle
+        const apiKeyInput = document.getElementById('api-key');
+        const apiSecretInput = document.getElementById('api-secret');
+        const apiTestnetCheckbox = document.getElementById('api-testnet');
+        const apiStatusIcon = document.getElementById('api-status-icon');
+
+        if (apiKeyInput) apiKeyInput.value = '';
+        if (apiSecretInput) apiSecretInput.placeholder = 'API Secret'; // Varsayılan placeholder'a dön
+        if (apiTestnetCheckbox) apiTestnetCheckbox.checked = false;
         
-        // Load existing API info
+        if (apiStatusIcon) {
+            apiStatusIcon.className = 'fas fa-spinner fa-spin api-status-icon-pending';
+        }
+
         try {
+            // API'den mevcut API key bilgilerini yükle
             const apiInfo = await makeAuthenticatedApiCall('/api/user/api-info');
-            
-            const apiKey = document.getElementById('api-key');
-            const apiTestnet = document.getElementById('api-testnet');
-            const apiSecret = document.getElementById('api-secret');
-            
+
+            // Başarılı olursa, alanları gelen verilerle doldur
             if (apiInfo.hasKeys) {
-                if (apiKey) apiKey.value = apiInfo.maskedApiKey || '';
-                if (apiTestnet) apiTestnet.checked = apiInfo.useTestnet || false;
-                if (apiSecret) apiSecret.placeholder = 'Mevcut secret korunuyor (değiştirmek için yeni girin)';
+                if (apiKeyInput) apiKeyInput.value = apiInfo.maskedApiKey || '';
+                if (apiTestnetCheckbox) apiTestnetCheckbox.checked = apiInfo.is_testnet || false; // Backend'den gelen is_testnet değerini kullan
+                if (apiSecretInput) apiSecretInput.placeholder = 'Mevcut secret korunuyor (değiştirmek için yeni girin)';
             }
+            
+            // API durumunu başarılı olarak güncelle
+            if (apiStatusIcon) {
+                apiStatusIcon.className = 'fas fa-check-circle api-status-icon-success';
+            }
+
         } catch (error) {
-            console.error('Error loading API info:', error);
+            // Hata olursa, kullanıcıya bilgi ver ve alanları temiz tut
+            console.error('API keys load error:', error);
+            showNotification('API key bilgileri yüklenirken hata oluştu. Lütfen tekrar deneyin.', 'error');
+            
+            if (apiStatusIcon) {
+                apiStatusIcon.className = 'fas fa-times-circle api-status-icon-error';
+            }
         }
     }
 }
