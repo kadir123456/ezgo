@@ -625,8 +625,8 @@ async def verify_token(current_user: dict = Depends(get_current_user)):
                 
                 user_data = {
                     "email": email,
-                    "created_at": firebase_db.ServerValue.TIMESTAMP,
-                    "last_login": firebase_db.ServerValue.TIMESTAMP,
+                    "created_at": int(datetime.utcnow().timestamp() * 1000),
+                    "last_login": int(datetime.utcnow().timestamp() * 1000),
                     "subscription_status": "trial",
                     "subscription_expiry": trial_expiry.isoformat(),
                     "api_keys_set": False,
@@ -641,7 +641,7 @@ async def verify_token(current_user: dict = Depends(get_current_user)):
                 # Update last login
                 from firebase_admin import db
                 user_ref.update({
-                    "last_login": firebase_db.ServerValue.TIMESTAMP
+                    "last_login": int(datetime.utcnow().timestamp() * 1000)
                 })
                 logger.info(f"Last login updated for: {user_id}")
         
@@ -839,7 +839,7 @@ async def get_account_data(current_user: dict = Depends(get_current_user)):
                             from firebase_admin import db
                             user_ref.update({
                                 "account_balance": balance,
-                                "last_balance_update": firebase_db.ServerValue.TIMESTAMP
+                                "last_balance_update": int(datetime.utcnow().timestamp() * 1000)
                             })
                             
                             await client.close()
@@ -1111,7 +1111,7 @@ async def save_api_keys(request: dict, current_user: dict = Depends(get_current_
                 "binance_api_secret": encrypted_api_secret,
                 "api_testnet": testnet,
                 "api_keys_set": True,
-                "api_updated_at": firebase_db.ServerValue.TIMESTAMP,
+                "api_updated_at": int(datetime.utcnow().timestamp() * 1000),
                 "account_balance": balance
             }
             
@@ -1379,7 +1379,7 @@ async def close_position(request: dict, current_user: dict = Depends(get_current
                 user_ref.update({
                     'total_trades': current_trades + 1,
                     'total_pnl': current_pnl + pnl,
-                    'last_trade_time': firebase_db.ServerValue.TIMESTAMP
+                    'last_trade_time': int(datetime.utcnow().timestamp() * 1000)
                 })
                 
                 await client.close()
@@ -1588,7 +1588,7 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
                 user_ref.update({
                     "bot_active": True,
                     "bot_symbol": request.get('symbol', 'BTCUSDT'),
-                    "bot_start_time": firebase_db.ServerValue.TIMESTAMP
+                    "bot_start_time": int(datetime.utcnow().timestamp() * 1000)
                 })
                 
                 return {
@@ -1640,7 +1640,7 @@ async def stop_bot(current_user: dict = Depends(get_current_user)):
                 user_ref = firebase_db.reference(f'users/{user_id}')
                 user_ref.update({
                     "bot_active": False,
-                    "bot_stop_time": firebase_db.ServerValue.TIMESTAMP
+                    "bot_stop_time": int(datetime.utcnow().timestamp() * 1000)
                 })
             except Exception as db_error:
                 logger.error(f"Database update error: {db_error}")
