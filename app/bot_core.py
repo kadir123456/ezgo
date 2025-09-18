@@ -43,13 +43,17 @@ class BotCore:
         self._stop_requested = False
         self._websocket_task = None
         self._monitor_task = None
-        self.quantity_precision = 0
-        self.price_precision = 2
+        self.quantity_precision = 3  # Default değer
+        self.price_precision = 2     # Default değer
+        
+        # WebSocket veri depolama
+        self.current_price = None
+        self.symbol_validated = False
         
         logger.info(f"BotCore created for user {user_id} with symbol {self.status['symbol']}")
 
     async def start(self):
-        """Kullanıcıya özel bot başlatma"""
+        """Kullanıcıya özel bot başlatma - WebSocket odaklı"""
         if self.status["is_running"]:
             logger.warning(f"Bot already running for user {self.user_id}")
             return
@@ -65,51 +69,70 @@ class BotCore:
             await self.binance_client.initialize()
             logger.info(f"Binance client initialized for user {self.user_id}")
             
-            # 2. Symbol bilgilerini al
-            symbol_info = await self.binance_client.get_symbol_info(self.status["symbol"])
-            if not symbol_info:
-                raise Exception(f"Symbol {self.status['symbol']} bilgileri alınamadı")
-            
-            # Precision hesaplama
-            self.quantity_precision = self._get_precision_from_filter(symbol_info, 'LOT_SIZE', 'stepSize')
-            self.price_precision = self._get_precision_from_filter(symbol_info, 'PRICE_FILTER', 'tickSize')
+            # 2. Symbol bilgilerini WebSocket'ten al (opsiyonel REST validation)
+            try:
+                symbol_info = await self.binance_client.get_symbol_info(self.status["symbol"])
+                if symbol_info:
+                    # Precision hesaplama
+                    self.quantity_precision = self._get_precision_from_filter(symbol_info, 'LOT_SIZE', 'stepSize')
+                    self.price_precision = self._get_precision_from_filter(symbol_info, 'PRICE_FILTER', 'tickSize')
+                    logger.info(f"Symbol info loaded for user {self.user_id}: precision={self.quantity_precision}")
+                else:
+                    logger.warning(f"Symbol info not available via REST for user {self.user_id}, using WebSocket")
+            except Exception as rest_error:
+                logger.warning(f"REST symbol validation failed for user {self.user_id}: {rest_error}")
+                logger.info("Continuing with WebSocket-only approach...")
             
             # 3. Hesap bakiyesi kontrolü
-            self.status["account_balance"] = await self.binance_client.get_account_balance(use_cache=False)
-            logger.info(f"Account balance for user {self.user_id}: {self.status['account_balance']} USDT")
+            try:
+                self.status["account_balance"] = await self.binance_client.get_account_balance(use_cache=False)
+                logger.info(f"Account balance for user {self.user_id}: {self.status['account_balance']} USDT")
+            except Exception as balance_error:
+                logger.warning(f"Balance check failed for user {self.user_id}: {balance_error}")
+                self.status["account_balance"] = 0.0
             
-            # 4. Kaldıraç ayarlama
-            await self.binance_client.set_leverage(self.status["symbol"], self.status["leverage"])
+            # 4. Kaldıraç ayarlama (opsiyonel)
+            try:
+                await self.binance_client.set_leverage(self.status["symbol"], self.status["leverage"])
+                logger.info(f"Leverage set for user {self.user_id}: {self.status['leverage']}x")
+            except Exception as leverage_error:
+                logger.warning(f"Leverage setting failed for user {self.user_id}: {leverage_error}")
             
-            # 5. Geçmiş veri çekme
-            klines = await self.binance_client.get_historical_klines(
-                self.status["symbol"], 
-                self.status["timeframe"], 
-                limit=50
-            )
-            if not klines:
-                raise Exception("Geçmiş veri alınamadı")
+            # 5. Geçmiş veri çekme (opsiyonel)
+            try:
+                klines = await self.binance_client.get_historical_klines(
+                    self.status["symbol"], 
+                    self.status["timeframe"], 
+                    limit=50
+                )
+                if klines:
+                    self.klines_data = klines
+                    logger.info(f"Historical data loaded for user {self.user_id}: {len(klines)} candles")
+                else:
+                    logger.warning(f"No historical data for user {self.user_id}, will use WebSocket data")
+            except Exception as klines_error:
+                logger.warning(f"Historical data loading failed for user {self.user_id}: {klines_error}")
             
-            self.klines_data = klines
-            logger.info(f"Historical data loaded for user {self.user_id}: {len(klines)} candles")
+            # 6. Mevcut pozisyon kontrolü (opsiyonel)
+            try:
+                open_positions = await self.binance_client.get_open_positions(self.status["symbol"], use_cache=False)
+                if open_positions:
+                    position = open_positions[0]
+                    position_amt = float(position['positionAmt'])
+                    if position_amt > 0:
+                        self.status["position_side"] = "LONG"
+                    elif position_amt < 0:
+                        self.status["position_side"] = "SHORT"
+                    logger.info(f"Existing position found for user {self.user_id}: {self.status['position_side']}")
+            except Exception as position_error:
+                logger.warning(f"Position check failed for user {self.user_id}: {position_error}")
             
-            # 6. Mevcut pozisyon kontrolü
-            open_positions = await self.binance_client.get_open_positions(self.status["symbol"], use_cache=False)
-            if open_positions:
-                position = open_positions[0]
-                position_amt = float(position['positionAmt'])
-                if position_amt > 0:
-                    self.status["position_side"] = "LONG"
-                elif position_amt < 0:
-                    self.status["position_side"] = "SHORT"
-                logger.info(f"Existing position found for user {self.user_id}: {self.status['position_side']}")
-            
-            # 7. WebSocket ve monitoring başlat
+            # 7. WebSocket ve monitoring başlat - ana veri kaynağı
             self._websocket_task = asyncio.create_task(self._websocket_loop())
             self._monitor_task = asyncio.create_task(self._monitor_loop())
             
-            self.status["status_message"] = f"Bot aktif - {self.status['symbol']} izleniyor"
-            logger.info(f"Bot started successfully for user {self.user_id}")
+            self.status["status_message"] = f"Bot aktif - {self.status['symbol']} WebSocket'ten izleniyor"
+            logger.info(f"Bot started successfully for user {self.user_id} with WebSocket data stream")
             
         except Exception as e:
             error_msg = f"Bot başlatma hatası: {e}"
@@ -156,15 +179,21 @@ class BotCore:
         logger.info(f"Bot stopped for user {self.user_id}")
 
     async def _websocket_loop(self):
-        """WebSocket veri akışı - kullanıcıya özel"""
+        """WebSocket veri akışı - hem ticker hem kline verisi"""
         symbol = self.status["symbol"].lower()
         timeframe = self.status["timeframe"]
-        ws_url = f"{settings.WEBSOCKET_URL}/ws/{symbol}@kline_{timeframe}"
+        
+        # Kombineli stream: hem fiyat hem kline verisi
+        ticker_stream = f"{symbol}@ticker"
+        kline_stream = f"{symbol}@kline_{timeframe}"
+        
+        # WebSocket URL - multiple streams
+        ws_url = f"wss://stream.binance.com:9443/stream?streams={ticker_stream}/{kline_stream}"
         
         reconnect_attempts = 0
         max_reconnects = 10
         
-        logger.info(f"Starting WebSocket for user {self.user_id} on {symbol}")
+        logger.info(f"Starting combined WebSocket for user {self.user_id} on {symbol}")
         
         while not self._stop_requested and reconnect_attempts < max_reconnects:
             try:
@@ -185,6 +214,7 @@ class BotCore:
                             try:
                                 await ws.ping()
                             except:
+                                logger.warning(f"WebSocket ping failed for user {self.user_id}")
                                 break
                         except websockets.exceptions.ConnectionClosed:
                             logger.warning(f"WebSocket closed for user {self.user_id}")
@@ -199,35 +229,113 @@ class BotCore:
                     backoff_time = min(5 * reconnect_attempts, 30)
                     logger.error(f"WebSocket error for user {self.user_id} (attempt {reconnect_attempts}): {e}")
                     if reconnect_attempts < max_reconnects:
+                        logger.info(f"Reconnecting WebSocket for user {self.user_id} in {backoff_time}s")
                         await asyncio.sleep(backoff_time)
+                    else:
+                        logger.error(f"Max WebSocket reconnect attempts reached for user {self.user_id}")
+                        await self.stop()
 
     async def _handle_websocket_message(self, message: str):
-        """WebSocket mesaj işleme - kullanıcıya özel"""
+        """WebSocket mesaj işleme - hem ticker hem kline"""
         try:
             data = json.loads(message)
-            kline_data = data.get('k', {})
             
-            # Sadece kapanan mumları işle
-            if not kline_data.get('x', False):
-                return
+            # Multi-stream formatında data gelir
+            if 'stream' in data and 'data' in data:
+                stream = data['stream']
+                stream_data = data['data']
+                
+                # Ticker verisi (fiyat güncellemeleri)
+                if '@ticker' in stream:
+                    await self._handle_ticker_data(stream_data)
+                
+                # Kline verisi (mum grafik verileri)
+                elif '@kline' in stream:
+                    await self._handle_kline_data(stream_data)
+                    
+            # Tek stream formatı (backward compatibility)
+            else:
+                if 'e' in data:
+                    if data['e'] == '24hrTicker':
+                        await self._handle_ticker_data(data)
+                    elif data['e'] == 'kline':
+                        await self._handle_kline_data(data)
+                        
+        except Exception as e:
+            logger.error(f"WebSocket message parsing error for user {self.user_id}: {e}")
+
+    async def _handle_ticker_data(self, ticker_data: dict):
+        """Ticker (fiyat) verisi işleme"""
+        try:
+            # Güncel fiyatı güncelle
+            self.current_price = float(ticker_data['c'])  # Close price
             
-            logger.info(f"New candle closed for user {self.user_id}: {kline_data['c']}")
+            # İlk kez sembol validation
+            if not self.symbol_validated:
+                self.symbol_validated = True
+                logger.info(f"Symbol {self.status['symbol']} validated via WebSocket for user {self.user_id}")
+                
+                # İlk fiyat geldiğinde bot'un tamamen hazır olduğunu belirt
+                if self.status["status_message"] == f"Bot aktif - {self.status['symbol']} WebSocket'ten izleniyor":
+                    self.status["status_message"] = f"Bot aktif - {self.status['symbol']} (${self.current_price})"
             
-            # Kline data güncelle
-            self.klines_data.pop(0) if len(self.klines_data) >= 50 else None
-            self.klines_data.append([
-                kline_data[key] for key in ['t','o','h','l','c','v','T','q','n','V','Q']
-            ] + ['0'])
-            
-            # Strateji analizi
-            signal = trading_strategy.analyze_klines(self.klines_data)
-            logger.info(f"Strategy signal for user {self.user_id}: {signal}")
-            
-            # Trading mantığı
-            await self._handle_trading_signal(signal, float(kline_data['c']))
+            logger.debug(f"Price update for user {self.user_id}: {self.current_price}")
             
         except Exception as e:
-            logger.error(f"WebSocket message handling error for user {self.user_id}: {e}")
+            logger.error(f"Ticker data handling error for user {self.user_id}: {e}")
+
+    async def _handle_kline_data(self, kline_data: dict):
+        """Kline (mum grafik) verisi işleme"""
+        try:
+            # Kline objesi içinden veri çıkar
+            if 'k' in kline_data:
+                kline_info = kline_data['k']
+            else:
+                kline_info = kline_data
+            
+            # Sadece kapanan mumları işle
+            if not kline_info.get('x', False):
+                return
+            
+            close_price = float(kline_info['c'])
+            logger.info(f"New candle closed for user {self.user_id}: ${close_price}")
+            
+            # Güncel fiyatı da güncelle
+            self.current_price = close_price
+            
+            # Kline data güncelle
+            new_kline = [
+                int(kline_info['t']),    # Open time
+                str(kline_info['o']),    # Open
+                str(kline_info['h']),    # High
+                str(kline_info['l']),    # Low
+                str(kline_info['c']),    # Close
+                str(kline_info['v']),    # Volume
+                int(kline_info['T']),    # Close time
+                str(kline_info['q']),    # Quote asset volume
+                int(kline_info['n']),    # Number of trades
+                str(kline_info['V']),    # Taker buy base asset volume
+                str(kline_info['Q']),    # Taker buy quote asset volume
+                '0'                      # Ignore
+            ]
+            
+            # Klines listesini güncelle
+            if len(self.klines_data) >= 50:
+                self.klines_data.pop(0)
+            self.klines_data.append(new_kline)
+            
+            # Yeterli veri varsa strateji analizi yap
+            if len(self.klines_data) >= 20:  # Minimum veri gereksinimi
+                signal = trading_strategy.analyze_klines(self.klines_data)
+                logger.info(f"Strategy signal for user {self.user_id}: {signal}")
+                
+                # Trading mantığı
+                await self._handle_trading_signal(signal, close_price)
+            else:
+                logger.info(f"Collecting data for user {self.user_id}: {len(self.klines_data)}/20 candles")
+            
+        except Exception as e:
+            logger.error(f"Kline data handling error for user {self.user_id}: {e}")
 
     async def _handle_trading_signal(self, signal: str, current_price: float):
         """Trading sinyal işleme - kullanıcıya özel"""
@@ -266,7 +374,7 @@ class BotCore:
             quantity = self._format_quantity((order_size * leverage) / entry_price)
             
             if quantity <= 0:
-                logger.error(f"Invalid quantity calculated for user {self.user_id}")
+                logger.error(f"Invalid quantity calculated for user {self.user_id}: {quantity}")
                 return False
             
             # Market order aç
@@ -281,7 +389,7 @@ class BotCore:
             
             if order:
                 self.status["position_side"] = signal
-                self.status["status_message"] = f"{signal} pozisyonu açıldı: {entry_price}"
+                self.status["status_message"] = f"{signal} pozisyonu açıldı: ${entry_price}"
                 self.status["total_trades"] += 1
                 
                 # Firebase'e kaydet
@@ -363,16 +471,27 @@ class BotCore:
         while not self._stop_requested and self.status["is_running"]:
             try:
                 # Hesap bakiyesi güncelle
-                self.status["account_balance"] = await self.binance_client.get_account_balance(use_cache=True)
+                try:
+                    self.status["account_balance"] = await self.binance_client.get_account_balance(use_cache=True)
+                except Exception as balance_error:
+                    logger.debug(f"Balance update error for user {self.user_id}: {balance_error}")
                 
                 # Pozisyon PnL güncelle
                 if self.status["position_side"]:
-                    self.status["position_pnl"] = await self.binance_client.get_position_pnl(
-                        self.status["symbol"], 
-                        use_cache=True
-                    )
+                    try:
+                        self.status["position_pnl"] = await self.binance_client.get_position_pnl(
+                            self.status["symbol"], 
+                            use_cache=True
+                        )
+                    except Exception as pnl_error:
+                        logger.debug(f"PnL update error for user {self.user_id}: {pnl_error}")
                 
                 self.status["last_check_time"] = datetime.now(timezone.utc).isoformat()
+                
+                # Status message güncelle (WebSocket fiyat ile)
+                if self.current_price and self.symbol_validated:
+                    position_text = f" - {self.status['position_side']}" if self.status["position_side"] else ""
+                    self.status["status_message"] = f"Bot aktif - {self.status['symbol']} (${self.current_price}){position_text}"
                 
                 # Kullanıcı verilerini Firebase'de güncelle
                 await self._update_user_data()
@@ -396,6 +515,8 @@ class BotCore:
                     "total_trades": self.status["total_trades"],
                     "total_pnl": self.status["total_pnl"],
                     "account_balance": self.status["account_balance"],
+                    "current_price": self.current_price,
+                    "symbol_validated": self.symbol_validated,
                     "last_bot_update": firebase_db.reference().server_timestamp
                 }
                 
@@ -407,13 +528,16 @@ class BotCore:
 
     def _get_precision_from_filter(self, symbol_info, filter_type, key):
         """Symbol precision hesaplama"""
-        for f in symbol_info['filters']:
-            if f['filterType'] == filter_type:
-                size_str = f[key]
-                if '.' in size_str:
-                    return len(size_str.split('.')[1].rstrip('0'))
-                return 0
-        return 0
+        try:
+            for f in symbol_info['filters']:
+                if f['filterType'] == filter_type:
+                    size_str = f[key]
+                    if '.' in size_str:
+                        return len(size_str.split('.')[1].rstrip('0'))
+                    return 0
+        except:
+            pass
+        return 3 if filter_type == 'LOT_SIZE' else 2  # Default values
 
     def _format_quantity(self, quantity: float):
         """Quantity formatla"""
@@ -436,5 +560,8 @@ class BotCore:
             "position_pnl": self.status["position_pnl"],
             "total_trades": self.status["total_trades"],
             "total_pnl": self.status["total_pnl"],
-            "last_check_time": self.status["last_check_time"]
+            "last_check_time": self.status["last_check_time"],
+            "current_price": self.current_price,
+            "symbol_validated": self.symbol_validated,
+            "data_candles": len(self.klines_data)
         }
