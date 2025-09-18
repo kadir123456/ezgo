@@ -2,31 +2,66 @@ from cryptography.fernet import Fernet
 import base64
 import os
 import logging
+from app.config import settings
 
 logger = logging.getLogger("crypto")
 
 def get_encryption_key():
     """Şifreleme anahtarını environment'dan al"""
-    encryption_key = os.getenv("ENCRYPTION_KEY")
+    encryption_key = settings.ENCRYPTION_KEY
     
     if not encryption_key:
-        raise ValueError("ENCRYPTION_KEY environment variable not set")
+        logger.error("ENCRYPTION_KEY environment variable not set")
+        # Generate a new key for development
+        key = Fernet.generate_key()
+        logger.warning(f"Generated new encryption key: {key.decode()}")
+        logger.warning("Please set this key in your environment variables!")
+        return key
     
-    # Base64 decode if needed
     try:
-        if encryption_key.startswith('"') and encryption_key.endswith('"'):
-            encryption_key = encryption_key[1:-1]  # Remove quotes
+        # If it's already bytes, return as is
+        if isinstance(encryption_key, bytes):
+            return encryption_key
         
-        # Test if it's a valid Fernet key
-        Fernet(encryption_key.encode())
-        return encryption_key.encode()
-    except Exception:
-        # If not valid, try to decode from base64
-        try:
-            decoded = base64.urlsafe_b64decode(encryption_key)
-            return decoded
-        except Exception as e:
-            raise ValueError(f"Invalid encryption key format: {e}")
+        # If it's a string, try to decode
+        if isinstance(encryption_key, str):
+            # Remove quotes if present
+            if encryption_key.startswith('"') and encryption_key.endswith('"'):
+                encryption_key = encryption_key[1:-1]
+            
+            # Try direct encoding first
+            try:
+                test_key = encryption_key.encode()
+                Fernet(test_key)  # Test if valid
+                return test_key
+            except:
+                pass
+            
+            # Try base64 decode
+            try:
+                decoded = base64.urlsafe_b64decode(encryption_key)
+                Fernet(decoded)  # Test if valid
+                return decoded
+            except:
+                pass
+            
+            # If all fails, generate new key
+            logger.error("Invalid encryption key format, generating new one")
+            key = Fernet.generate_key()
+            logger.warning(f"Generated new encryption key: {key.decode()}")
+            return key
+        
+        # Fallback: generate new key
+        key = Fernet.generate_key()
+        logger.warning(f"Generated new encryption key: {key.decode()}")
+        return key
+        
+    except Exception as e:
+        logger.error(f"Encryption key error: {e}")
+        # Generate new key as fallback
+        key = Fernet.generate_key()
+        logger.warning(f"Generated new encryption key: {key.decode()}")
+        return key
 
 def encrypt_data(data: str) -> str:
     """Verilen metni şifreler"""
