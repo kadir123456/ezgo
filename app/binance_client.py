@@ -1,6 +1,6 @@
 import asyncio
 from binance import AsyncClient
-from binance.exceptions import BinanceAPIException
+from binance.exceptions import BinanceAPIException, BinanceRequestException
 from .config import settings
 import time
 from typing import Optional, Dict, Any
@@ -39,27 +39,22 @@ class BinanceClient:
                     testnet=self.is_testnet
                 )
                 
-                # Test connection
-                await self._rate_limit_delay()
-                account_info = await self.client.futures_account()
-                if not account_info:
-                    raise Exception("Account info could not be retrieved")
-                
-                # Exchange info al
-                await self._rate_limit_delay()
-                self.exchange_info = await self.client.futures_exchange_info()
-                
+                # Test connection (Hesap bilgilerini alarak bağlantıyı test eder)
+                await self.client.futures_account()
                 logger.info(f"BinanceClient initialized successfully for {self.api_key[:8]}...")
-                return self.client
-                
+                return True
+            
+            except BinanceAPIException as e:
+                logger.error(f"Binance API returned error during initialization: {e.status_code} - {e.message}")
+                return False
+            except BinanceRequestException as e:
+                logger.error(f"Binance request failed during initialization: {e.status_code} - {e.message}")
+                return False
             except Exception as e:
-                logger.error(f"BinanceClient initialization failed: {e}")
-                if self.client:
-                    await self.client.close_connection()
-                    self.client = None
-                raise Exception(f"Binance bağlantı hatası: {str(e)}")
+                logger.error(f"An unexpected error occurred during Binance client initialization: {e}")
+                return False
         
-        return self.client
+        return True # Eğer client zaten varsa, True döndür
         
     async def _rate_limit_delay(self):
         """Rate limit koruması"""
