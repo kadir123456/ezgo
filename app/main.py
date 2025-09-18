@@ -795,7 +795,6 @@ async def get_account_data(current_user: dict = Depends(get_current_user)):
                         await client.initialize()
                         
                         balance = await client.get_account_balance(use_cache=False)
-                            
                             account_data = {
                                 "totalBalance": balance,
                                 "availableBalance": balance,
