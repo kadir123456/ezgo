@@ -503,28 +503,31 @@ class BotCore:
                 await asyncio.sleep(10)
 
     async def _update_user_data(self):
-        """Kullanıcı verilerini Firebase'de güncelle"""
-        try:
-            from app.main import firebase_db, firebase_initialized
+    """Kullanıcı verilerini Firebase'de güncelle"""
+    try:
+        from app.main import firebase_db, firebase_initialized
+        
+        if firebase_initialized and firebase_db:
+            # Firebase ServerValue import'u
+            from firebase_admin import firestore
             
-            if firebase_initialized and firebase_db:
-                user_update = {
-                    "bot_active": self.status["is_running"],
-                    "bot_symbol": self.status["symbol"],
-                    "bot_position": self.status["position_side"],
-                    "total_trades": self.status["total_trades"],
-                    "total_pnl": self.status["total_pnl"],
-                    "account_balance": self.status["account_balance"],
-                    "current_price": self.current_price,
-                    "symbol_validated": self.symbol_validated,
-                    "last_bot_update": firebase_db.reference().server_timestamp
-                }
-                
-                user_ref = firebase_db.reference(f'users/{self.user_id}')
-                user_ref.update(user_update)
+            user_update = {
+                "bot_active": self.status["is_running"],
+                "bot_symbol": self.status["symbol"],
+                "bot_position": self.status["position_side"],
+                "total_trades": self.status["total_trades"],
+                "total_pnl": self.status["total_pnl"],
+                "account_balance": self.status["account_balance"],
+                "current_price": self.current_price,
+                "symbol_validated": self.symbol_validated,
+                "last_bot_update": firestore.SERVER_TIMESTAMP  # Düzeltme
+            }
             
-        except Exception as e:
-            logger.error(f"User data update error for user {self.user_id}: {e}")
+            user_ref = firebase_db.reference(f'users/{self.user_id}')
+            user_ref.update(user_update)
+        
+    except Exception as e:
+        logger.error(f"User data update error for user {self.user_id}: {e}")
 
     def _get_precision_from_filter(self, symbol_info, filter_type, key):
         """Symbol precision hesaplama"""
