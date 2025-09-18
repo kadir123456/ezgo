@@ -5,7 +5,7 @@ websockets
 numpy
 pandas
 python-dotenv
-firebase-admin
+firebase-admin>=6.0.0
 python-multipart
 aiofiles
 structlog
