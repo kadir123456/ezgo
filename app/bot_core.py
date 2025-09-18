@@ -503,10 +503,9 @@ class BotCore:
                 await asyncio.sleep(10)
 
     async def _update_user_data(self):
-        """Kullanıcı verilerini Firebase'de güncelle"""
+        """Kullanıcı verilerini Firebase'de güncelle - FIX: ServerValue hatası düzeltildi"""
         try:
             from app.main import firebase_db, firebase_initialized
-            from firebase_admin import db  # Firebase server timestamp için
             
             if firebase_initialized and firebase_db:
                 user_update = {
@@ -518,7 +517,7 @@ class BotCore:
                     "account_balance": self.status["account_balance"],
                     "current_price": self.current_price,
                     "symbol_validated": self.symbol_validated,
-                    "last_bot_update": db.ServerValue.TIMESTAMP  # Düzeltildi
+                    "last_bot_update": int(time.time() * 1000)  # FIX: Manual timestamp kullan
                 }
                 
                 user_ref = firebase_db.reference(f'users/{self.user_id}')
