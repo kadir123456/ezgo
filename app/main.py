@@ -1061,6 +1061,7 @@ async def save_api_keys(request: dict, current_user: dict = Depends(get_current_
         # Encrypt and save
         try:
             from app.utils.crypto import encrypt_data
+            
             encrypted_api_key = encrypt_data(api_key)
             encrypted_api_secret = encrypt_data(api_secret)
             
@@ -1078,23 +1079,27 @@ async def save_api_keys(request: dict, current_user: dict = Depends(get_current_
             user_ref = firebase_db.reference(f'users/{user_id}')
             user_ref.update(api_data)
             
-            logger.info(f"API keys saved for user: {user_id}")
+            logger.info(f"API keys saved successfully for user: {user_id}")
             
-        except Exception as save_error:
-            logger.error(f"API keys save error: {save_error}")
-            # Still return success since API test passed
             return {
                 "success": True,
-                "message": "API keys tested successfully but not saved (database error)",
-                "balance": balance,
-                "error": str(save_error)
+                "message": "API keys saved and tested successfully",
+                "balance": balance
             }
-        
-        return {
-            "success": True,
-            "message": "API keys saved and tested successfully",
-            "balance": balance
-        }
+            
+        except ImportError as import_error:
+            logger.error(f"Crypto module import error: {import_error}")
+            raise HTTPException(
+                status_code=500, 
+                detail="Encryption service unavailable. Please contact support."
+            )
+        except Exception as save_error:
+            logger.error(f"API keys save error: {save_error}")
+            logger.error(f"Save error traceback: {traceback.format_exc()}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to save API keys: {str(save_error)}"
+            )
         
     except HTTPException:
         raise
