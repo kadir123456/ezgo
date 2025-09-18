@@ -1,3 +1,5 @@
+from binance.client import Client
+from binance.exceptions import BinanceAPIException, BinanceRequestException
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse
