@@ -3,7 +3,6 @@ import json
 import websockets
 from .config import settings
 from .trading_strategy import trading_strategy
-from .firebase_manager import firebase_manager
 from datetime import datetime, timezone
 import math
 import time
@@ -286,15 +285,21 @@ class BotCore:
                 self.status["total_trades"] += 1
                 
                 # Firebase'e kaydet
-                firebase_manager.log_trade({
-                    "user_id": self.user_id,
-                    "symbol": self.status["symbol"],
-                    "side": signal,
-                    "quantity": quantity,
-                    "price": entry_price,
-                    "status": "OPENED",
-                    "timestamp": datetime.now(timezone.utc)
-                })
+                try:
+                    from app.main import firebase_db, firebase_initialized
+                    if firebase_initialized and firebase_db:
+                        trades_ref = firebase_db.reference('trades')
+                        trades_ref.push({
+                            "user_id": self.user_id,
+                            "symbol": self.status["symbol"],
+                            "side": signal,
+                            "quantity": quantity,
+                            "price": entry_price,
+                            "status": "OPENED",
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                except Exception as log_error:
+                    logger.error(f"Trade logging error: {log_error}")
                 
                 logger.info(f"Position opened successfully for user {self.user_id}")
                 return True
@@ -331,13 +336,19 @@ class BotCore:
                 
                 if close_result:
                     # Firebase'e kaydet
-                    firebase_manager.log_trade({
-                        "user_id": self.user_id,
-                        "symbol": self.status["symbol"],
-                        "pnl": pnl,
-                        "status": "CLOSED_BY_FLIP",
-                        "timestamp": datetime.now(timezone.utc)
-                    })
+                    try:
+                        from app.main import firebase_db, firebase_initialized
+                        if firebase_initialized and firebase_db:
+                            trades_ref = firebase_db.reference('trades')
+                            trades_ref.push({
+                                "user_id": self.user_id,
+                                "symbol": self.status["symbol"],
+                                "pnl": pnl,
+                                "status": "CLOSED_BY_FLIP",
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+                    except Exception as log_error:
+                        logger.error(f"Trade logging error: {log_error}")
                     
                     await asyncio.sleep(1)
                     
@@ -375,17 +386,21 @@ class BotCore:
     async def _update_user_data(self):
         """Kullanıcı verilerini Firebase'de güncelle"""
         try:
-            user_update = {
-                "bot_active": self.status["is_running"],
-                "bot_symbol": self.status["symbol"],
-                "bot_position": self.status["position_side"],
-                "total_trades": self.status["total_trades"],
-                "total_pnl": self.status["total_pnl"],
-                "account_balance": self.status["account_balance"],
-                "last_bot_update": firebase_manager.db.reference().server_timestamp
-            }
+            from app.main import firebase_db, firebase_initialized
             
-            firebase_manager.db.reference(f'users/{self.user_id}').update(user_update)
+            if firebase_initialized and firebase_db:
+                user_update = {
+                    "bot_active": self.status["is_running"],
+                    "bot_symbol": self.status["symbol"],
+                    "bot_position": self.status["position_side"],
+                    "total_trades": self.status["total_trades"],
+                    "total_pnl": self.status["total_pnl"],
+                    "account_balance": self.status["account_balance"],
+                    "last_bot_update": firebase_db.reference().server_timestamp
+                }
+                
+                user_ref = firebase_db.reference(f'users/{self.user_id}')
+                user_ref.update(user_update)
             
         except Exception as e:
             logger.error(f"User data update error for user {self.user_id}: {e}")
