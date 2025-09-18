@@ -582,10 +582,12 @@ async def verify_token(current_user: dict = Depends(get_current_user)):
                 # Calculate trial expiry (7 days from now)
                 trial_expiry = datetime.now(timezone.utc) + timedelta(days=7)
                 
+                from firebase_admin import db
+                
                 user_data = {
                     "email": email,
-                    "created_at": firebase_db.reference().server_timestamp,
-                    "last_login": firebase_db.reference().server_timestamp,
+                    "created_at": db.SERVER_TIMESTAMP,
+                    "last_login": db.SERVER_TIMESTAMP,
                     "subscription_status": "trial",
                     "subscription_expiry": trial_expiry.isoformat(),
                     "api_keys_set": False,
@@ -598,8 +600,9 @@ async def verify_token(current_user: dict = Depends(get_current_user)):
                 logger.info(f"User data created for: {user_id}")
             else:
                 # Update last login
+                from firebase_admin import db
                 user_ref.update({
-                    "last_login": firebase_db.reference().server_timestamp
+                    "last_login": db.SERVER_TIMESTAMP
                 })
                 logger.info(f"Last login updated for: {user_id}")
         
@@ -794,9 +797,10 @@ async def get_account_data(current_user: dict = Depends(get_current_user)):
                             }
                             
                             # Update cache
+                            from firebase_admin import db
                             user_ref.update({
                                 "account_balance": balance,
-                                "last_balance_update": firebase_db.reference().server_timestamp
+                                "last_balance_update": db.SERVER_TIMESTAMP
                             })
                             
                             await client.close()
@@ -1060,12 +1064,14 @@ async def save_api_keys(request: dict, current_user: dict = Depends(get_current_
             encrypted_api_key = encrypt_data(api_key)
             encrypted_api_secret = encrypt_data(api_secret)
             
+            from firebase_admin import db
+            
             api_data = {
                 "binance_api_key": encrypted_api_key,
                 "binance_api_secret": encrypted_api_secret,
                 "api_testnet": testnet,
                 "api_keys_set": True,
-                "api_updated_at": firebase_db.reference().server_timestamp,
+                "api_updated_at": db.SERVER_TIMESTAMP,
                 "account_balance": balance
             }
             
@@ -1322,13 +1328,14 @@ async def close_position(request: dict, current_user: dict = Depends(get_current
                     logger.error(f"Trade logging error: {log_error}")
                 
                 # Update user stats
+                from firebase_admin import db
                 current_trades = user_data.get('total_trades', 0)
                 current_pnl = user_data.get('total_pnl', 0.0)
                 
                 user_ref.update({
                     'total_trades': current_trades + 1,
                     'total_pnl': current_pnl + pnl,
-                    'last_trade_time': firebase_db.reference().server_timestamp
+                    'last_trade_time': db.SERVER_TIMESTAMP
                 })
                 
                 await client.close()
@@ -1533,10 +1540,11 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
                     raise HTTPException(status_code=400, detail=result["error"])
                 
                 # Update user data
+                from firebase_admin import db
                 user_ref.update({
                     "bot_active": True,
                     "bot_symbol": request.get('symbol', 'BTCUSDT'),
-                    "bot_start_time": firebase_db.reference().server_timestamp
+                    "bot_start_time": db.SERVER_TIMESTAMP
                 })
                 
                 return {
@@ -1584,10 +1592,11 @@ async def stop_bot(current_user: dict = Depends(get_current_user)):
         # Update user data
         if firebase_initialized and firebase_db:
             try:
+                from firebase_admin import db
                 user_ref = firebase_db.reference(f'users/{user_id}')
                 user_ref.update({
                     "bot_active": False,
-                    "bot_stop_time": firebase_db.reference().server_timestamp
+                    "bot_stop_time": db.SERVER_TIMESTAMP
                 })
             except Exception as db_error:
                 logger.error(f"Database update error: {db_error}")
