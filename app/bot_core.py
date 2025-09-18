@@ -61,9 +61,9 @@ class BotCore:
         self._monitor_task = None
         self._strategy_task = None
         
-        # Trading controls
+        # Trading controls - EMA Crossover için optimize edildi
         self.last_trade_time = 0
-        self.min_trade_interval = 60  # 1 dakika
+        self.min_trade_interval = 30  # 30 saniye (EMA crossover için)
         self.consecutive_losses = 0
         self.max_consecutive_losses = 3
         
@@ -399,35 +399,37 @@ class BotCore:
                 self.klines_data.pop(0)
             self.klines_data.append(new_kline)
             
-            # Trigger strategy analysis
-            if len(self.klines_data) >= 20:
+            # Trigger strategy analysis - EMA Crossover
+            if len(self.klines_data) >= 25:  # EMA21 + buffer için daha fazla veri
                 signal = trading_strategy.analyze_klines(self.klines_data)
                 if signal != self.status["last_signal"]:
-                    logger.info(f"Strategy signal changed for user {self.user_id}: {self.status['last_signal']} -> {signal}")
+                    logger.info(f"🔄 EMA Strategy signal changed for user {self.user_id}: {self.status['last_signal']} -> {signal}")
                     self.status["last_signal"] = signal
+                else:
+                    logger.debug(f"EMA Strategy signal unchanged for user {self.user_id}: {signal}")
             else:
-                logger.info(f"Collecting data for user {self.user_id}: {len(self.klines_data)}/20 candles")
+                logger.info(f"📊 Collecting EMA data for user {self.user_id}: {len(self.klines_data)}/25 candles")
             
         except Exception as e:
             logger.error(f"Kline data handling error for user {self.user_id}: {e}")
 
     async def _strategy_loop(self):
-        """Main strategy execution loop"""
-        logger.info(f"Strategy loop started for user {self.user_id}")
+        """Main strategy execution loop - EMA Crossover için optimize edildi"""
+        logger.info(f"📈 EMA Crossover strategy loop started for user {self.user_id}")
         
         while not self._stop_requested and self.status["is_running"]:
             try:
-                if len(self.klines_data) >= 20 and self.current_price:
+                if len(self.klines_data) >= 25 and self.current_price:  # EMA21 + buffer
                     await self._execute_trading_strategy()
                 
-                await asyncio.sleep(15)  # Strategy check interval
+                await asyncio.sleep(10)  # 10 saniye interval (EMA için)
                 
             except Exception as e:
                 logger.error(f"Strategy loop error for user {self.user_id}: {e}")
                 await asyncio.sleep(30)
 
     async def _execute_trading_strategy(self):
-        """Main trading strategy execution"""
+        """EMA Crossover trading strategy execution"""
         try:
             current_time = time.time()
             
@@ -437,7 +439,7 @@ class BotCore:
             
             # Consecutive losses protection
             if self.consecutive_losses >= self.max_consecutive_losses:
-                logger.warning(f"Max consecutive losses reached for user {self.user_id}, pausing trading")
+                logger.warning(f"⚠️ Max consecutive losses reached for user {self.user_id}, pausing trading")
                 return
             
             signal = self.status["last_signal"]
@@ -447,8 +449,11 @@ class BotCore:
             if signal == "HOLD":
                 return
             
+            logger.info(f"📊 EMA Strategy execution for user {self.user_id}: Signal={signal}, Position={current_position}")
+            
             # No position, open new position
             if not current_position and signal in ["LONG", "SHORT"]:
+                logger.info(f"🎯 Opening new {signal} position for user {self.user_id}")
                 await self._open_position(signal, self.current_price)
                 return
             
@@ -456,6 +461,7 @@ class BotCore:
             if current_position:
                 # Opposite signal - flip position
                 if signal != current_position and signal in ["LONG", "SHORT"]:
+                    logger.info(f"🔄 EMA Crossover flip signal for user {self.user_id}: {current_position} -> {signal}")
                     await self._flip_position(signal, self.current_price)
                     return
                 
@@ -463,12 +469,12 @@ class BotCore:
                 await self._check_exit_conditions()
                 
         except Exception as e:
-            logger.error(f"Trading strategy execution error for user {self.user_id}: {e}")
+            logger.error(f"EMA trading strategy execution error for user {self.user_id}: {e}")
 
     async def _open_position(self, signal: str, entry_price: float):
-        """Position opening with existing BinanceClient"""
+        """EMA Crossover position opening"""
         try:
-            logger.info(f"Opening {signal} position for user {self.user_id} at ${entry_price:.2f}")
+            logger.info(f"📈 Opening {signal} position for user {self.user_id} at ${entry_price:.2f} (EMA Crossover)")
             
             # Pre-trade cleanup
             await self.binance_client.cancel_all_orders_safe(self.status["symbol"])
@@ -480,13 +486,13 @@ class BotCore:
             quantity = self._calculate_position_size(order_size, leverage, entry_price)
             
             if quantity <= 0:
-                logger.error(f"Invalid quantity calculated for user {self.user_id}: {quantity}")
+                logger.error(f"❌ Invalid quantity calculated for user {self.user_id}: {quantity}")
                 return False
             
             # Check minimum notional
             notional = quantity * entry_price
             if notional < self.min_notional:
-                logger.error(f"Order below minimum notional for user {self.user_id}: {notional} < {self.min_notional}")
+                logger.error(f"❌ Order below minimum notional for user {self.user_id}: {notional} < {self.min_notional}")
                 return False
             
             # Place market order using existing method
@@ -506,7 +512,7 @@ class BotCore:
                     self.status.update({
                         "position_side": signal,
                         "entry_price": entry_price,
-                        "status_message": f"{signal} pozisyonu açıldı: ${entry_price:.2f}",
+                        "status_message": f"✅ {signal} pozisyonu açıldı: ${entry_price:.2f} (EMA)",
                         "total_trades": self.status["total_trades"] + 1,
                         "last_trade_time": time.time()
                     })
@@ -519,30 +525,31 @@ class BotCore:
                         "side": signal,
                         "quantity": quantity,
                         "price": entry_price,
+                        "strategy": "EMA_CROSSOVER",
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
                     
-                    logger.info(f"Position opened successfully for user {self.user_id}: {signal} at ${entry_price:.2f}")
+                    logger.info(f"✅ EMA Crossover position opened successfully for user {self.user_id}: {signal} at ${entry_price:.2f}")
                     return True
                 else:
-                    logger.error(f"Failed to open position for user {self.user_id}")
+                    logger.error(f"❌ Failed to open EMA position for user {self.user_id}")
                     return False
                     
             except Exception as order_error:
-                logger.error(f"Order placement error for user {self.user_id}: {order_error}")
+                logger.error(f"❌ EMA order placement error for user {self.user_id}: {order_error}")
                 return False
                 
         except Exception as e:
-            logger.error(f"Position opening error for user {self.user_id}: {e}")
+            logger.error(f"❌ EMA position opening error for user {self.user_id}: {e}")
             return False
 
     async def _flip_position(self, new_signal: str, current_price: float):
-        """Position flipping"""
+        """EMA Crossover position flipping"""
         try:
-            logger.info(f"Flipping position for user {self.user_id}: {self.status['position_side']} -> {new_signal}")
+            logger.info(f"🔄 EMA Crossover flipping position for user {self.user_id}: {self.status['position_side']} -> {new_signal} at ${current_price:.2f}")
             
             # Close current position first
-            close_result = await self._close_position("FLIP")
+            close_result = await self._close_position("EMA_FLIP")
             
             if close_result:
                 await asyncio.sleep(1)  # Brief pause
@@ -550,7 +557,7 @@ class BotCore:
                 await self._open_position(new_signal, current_price)
             
         except Exception as e:
-            logger.error(f"Position flip error for user {self.user_id}: {e}")
+            logger.error(f"❌ EMA position flip error for user {self.user_id}: {e}")
 
     async def _close_position(self, reason: str = "SIGNAL"):
         """Position closing using existing BinanceClient"""
@@ -686,7 +693,7 @@ class BotCore:
                 await asyncio.sleep(10)
 
     async def _update_status_message(self):
-        """Update status message"""
+        """Update status message - EMA Crossover için"""
         try:
             if self.current_price and self.symbol_validated:
                 position_text = ""
@@ -694,10 +701,10 @@ class BotCore:
                     pnl_text = f" (PnL: ${self.status.get('unrealized_pnl', 0):.2f})"
                     position_text = f" - {self.status['position_side']}{pnl_text}"
                 
-                signal_text = f" - Signal: {self.status['last_signal']}"
+                signal_text = f" - EMA: {self.status['last_signal']}"
                 price_text = f" (${self.current_price:.2f})"
                 
-                self.status["status_message"] = f"Bot aktif - {self.status['symbol']}{price_text}{position_text}{signal_text}"
+                self.status["status_message"] = f"📈 EMA Bot aktif - {self.status['symbol']}{price_text}{position_text}{signal_text}"
                 
         except Exception as e:
             logger.error(f"Status message update error for user {self.user_id}: {e}")
