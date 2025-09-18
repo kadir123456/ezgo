@@ -582,10 +582,12 @@ async def verify_token(current_user: dict = Depends(get_current_user)):
                 # Calculate trial expiry (7 days from now)
                 trial_expiry = datetime.now(timezone.utc) + timedelta(days=7)
                 
+                from firebase_admin import db
+                
                 user_data = {
                     "email": email,
-                    "created_at": firebase_db.ServerValue.TIMESTAMP,
-                    "last_login": firebase_db.ServerValue.TIMESTAMP,
+                    "created_at": db.SERVER_TIMESTAMP,
+                    "last_login": db.SERVER_TIMESTAMP,
                     "subscription_status": "trial",
                     "subscription_expiry": trial_expiry.isoformat(),
                     "api_keys_set": False,
@@ -598,8 +600,9 @@ async def verify_token(current_user: dict = Depends(get_current_user)):
                 logger.info(f"User data created for: {user_id}")
             else:
                 # Update last login
+                from firebase_admin import db
                 user_ref.update({
-                    "last_login": firebase_db.ServerValue.TIMESTAMP
+                    "last_login": db.SERVER_TIMESTAMP
                 })
                 logger.info(f"Last login updated for: {user_id}")
         
@@ -770,31 +773,22 @@ async def get_account_data(current_user: dict = Depends(get_current_user)):
             # If API keys exist, get real Binance data
             if user_data and user_data.get('api_keys_set'):
                 try:
-                    # Try plain text keys first (temporary), then encrypted
-                    api_key = user_data.get('binance_api_key_plain')
-                    api_secret = user_data.get('binance_api_secret_plain')
+                    from app.utils.crypto import decrypt_data
+                    from app.binance_client import BinanceClient
                     
-                    if not api_key or not api_secret:
-                        # Try encrypted keys
-                        try:
-                            from app.utils.crypto import decrypt_data
-                            encrypted_api_key = user_data.get('binance_api_key')
-                            encrypted_api_secret = user_data.get('binance_api_secret')
-                            
-                            if encrypted_api_key and encrypted_api_secret:
-                                api_key = decrypt_data(encrypted_api_key)
-                                api_secret = decrypt_data(encrypted_api_secret)
-                        except Exception as decrypt_error:
-                            logger.error(f"Decryption failed: {decrypt_error}")
-                            api_key = None
-                            api_secret = None
+                    encrypted_api_key = user_data.get('binance_api_key')
+                    encrypted_api_secret = user_data.get('binance_api_secret')
                     
-                    if api_key and api_secret:
-                        from app.binance_client import BinanceClient
-                        client = BinanceClient(api_key, api_secret)
-                        await client.initialize()
+                    if encrypted_api_key and encrypted_api_secret:
+                        api_key = decrypt_data(encrypted_api_key)
+                        api_secret = decrypt_data(encrypted_api_secret)
                         
-                        balance = await client.get_account_balance(use_cache=False)
+                        if api_key and api_secret:
+                            client = BinanceClient(api_key, api_secret)
+                            await client.initialize()
+                            
+                            balance = await client.get_account_balance(use_cache=False)
+                            
                             account_data = {
                                 "totalBalance": balance,
                                 "availableBalance": balance,
@@ -803,9 +797,10 @@ async def get_account_data(current_user: dict = Depends(get_current_user)):
                             }
                             
                             # Update cache
+                            from firebase_admin import db
                             user_ref.update({
                                 "account_balance": balance,
-                                "last_balance_update": firebase_db.ServerValue.TIMESTAMP
+                                "last_balance_update": db.SERVER_TIMESTAMP
                             })
                             
                             await client.close()
@@ -846,28 +841,18 @@ async def get_user_positions(current_user: dict = Depends(get_current_user)):
             
             if user_data and user_data.get('api_keys_set'):
                 try:
-                    # Try plain text keys first (temporary), then encrypted
-                    api_key = user_data.get('binance_api_key_plain')
-                    api_secret = user_data.get('binance_api_secret_plain')
+                    from app.utils.crypto import decrypt_data
+                    from app.binance_client import BinanceClient
                     
-                    if not api_key or not api_secret:
-                        # Try encrypted keys
-                        try:
-                            from app.utils.crypto import decrypt_data
-                            encrypted_api_key = user_data.get('binance_api_key')
-                            encrypted_api_secret = user_data.get('binance_api_secret')
-                            
-                            if encrypted_api_key and encrypted_api_secret:
-                                api_key = decrypt_data(encrypted_api_key)
-                                api_secret = decrypt_data(encrypted_api_secret)
-                        except Exception as decrypt_error:
-                            logger.error(f"Decryption failed: {decrypt_error}")
-                            api_key = None
-                            api_secret = None
+                    encrypted_api_key = user_data.get('binance_api_key')
+                    encrypted_api_secret = user_data.get('binance_api_secret')
                     
-                    if api_key and api_secret:
-                        from app.binance_client import BinanceClient
-                        client = BinanceClient(api_key, api_secret)
+                    if encrypted_api_key and encrypted_api_secret:
+                        api_key = decrypt_data(encrypted_api_key)
+                        api_secret = decrypt_data(encrypted_api_secret)
+                        
+                        if api_key and api_secret:
+                            client = BinanceClient(api_key, api_secret)
                             await client.initialize()
                             
                             # Get all positions
@@ -940,28 +925,18 @@ async def get_recent_trades(current_user: dict = Depends(get_current_user), limi
                 user_data = user_ref.get()
                 
                 if user_data and user_data.get('api_keys_set'):
-                    # Try plain text keys first (temporary), then encrypted  
-                    api_key = user_data.get('binance_api_key_plain')
-                    api_secret = user_data.get('binance_api_secret_plain')
+                    from app.utils.crypto import decrypt_data
+                    from app.binance_client import BinanceClient
                     
-                    if not api_key or not api_secret:
-                        # Try encrypted keys
-                        try:
-                            from app.utils.crypto import decrypt_data
-                            encrypted_api_key = user_data.get('binance_api_key')
-                            encrypted_api_secret = user_data.get('binance_api_secret')
-                            
-                            if encrypted_api_key and encrypted_api_secret:
-                                api_key = decrypt_data(encrypted_api_key)
-                                api_secret = decrypt_data(encrypted_api_secret)
-                        except Exception as decrypt_error:
-                            logger.error(f"Decryption failed: {decrypt_error}")
-                            api_key = None
-                            api_secret = None
+                    encrypted_api_key = user_data.get('binance_api_key')
+                    encrypted_api_secret = user_data.get('binance_api_secret')
                     
-                    if api_key and api_secret:
-                        from app.binance_client import BinanceClient
-                        client = BinanceClient(api_key, api_secret)
+                    if encrypted_api_key and encrypted_api_secret:
+                        api_key = decrypt_data(encrypted_api_key)
+                        api_secret = decrypt_data(encrypted_api_secret)
+                        
+                        if api_key and api_secret:
+                            client = BinanceClient(api_key, api_secret)
                             await client.initialize()
                             
                             # Get recent trades for BTCUSDT
@@ -1083,15 +1058,21 @@ async def save_api_keys(request: dict, current_user: dict = Depends(get_current_
                 "firebase_available": False
             }
         
-        # Test and save API keys (without encryption for now)
+        # Encrypt and save
         try:
-            # For now, save without encryption to test
+            from app.utils.crypto import encrypt_data
+            
+            encrypted_api_key = encrypt_data(api_key)
+            encrypted_api_secret = encrypt_data(api_secret)
+            
+            from firebase_admin import db
+            
             api_data = {
-                "binance_api_key_plain": api_key,  # Temporary - normally encrypted
-                "binance_api_secret_plain": api_secret,  # Temporary - normally encrypted  
+                "binance_api_key": encrypted_api_key,
+                "binance_api_secret": encrypted_api_secret,
                 "api_testnet": testnet,
                 "api_keys_set": True,
-                "api_updated_at": firebase_db.ServerValue.TIMESTAMP,
+                "api_updated_at": db.SERVER_TIMESTAMP,
                 "account_balance": balance
             }
             
@@ -1106,6 +1087,12 @@ async def save_api_keys(request: dict, current_user: dict = Depends(get_current_
                 "balance": balance
             }
             
+        except ImportError as import_error:
+            logger.error(f"Crypto module import error: {import_error}")
+            raise HTTPException(
+                status_code=500, 
+                detail="Encryption service unavailable. Please contact support."
+            )
         except Exception as save_error:
             logger.error(f"API keys save error: {save_error}")
             logger.error(f"Save error traceback: {traceback.format_exc()}")
@@ -1147,23 +1134,17 @@ async def get_api_info(current_user: dict = Depends(get_current_user)):
             has_keys = user_data.get('api_keys_set', False)
             
             if has_keys:
-                # Try plain text key first (temporary), then encrypted
-                api_key = user_data.get('binance_api_key_plain')
+                encrypted_api_key = user_data.get('binance_api_key')
+                masked_key = None
                 
-                if not api_key:
-                    # Try encrypted key
-                    encrypted_api_key = user_data.get('binance_api_key')
-                    if encrypted_api_key:
-                        try:
-                            from app.utils.crypto import decrypt_data
-                            api_key = decrypt_data(encrypted_api_key)
-                        except:
-                            api_key = None
-                
-                if api_key and len(api_key) >= 8:
-                    masked_key = api_key[:8] + "..." + api_key[-4:]
-                else:
-                    masked_key = "API Key Set"
+                if encrypted_api_key:
+                    try:
+                        from app.utils.crypto import decrypt_data
+                        api_key = decrypt_data(encrypted_api_key)
+                        if api_key and len(api_key) >= 8:
+                            masked_key = api_key[:8] + "..." + api_key[-4:]
+                    except:
+                        masked_key = "Encrypted API Key"
                 
                 return {
                     "hasKeys": True,
@@ -1225,28 +1206,18 @@ async def get_api_status(current_user: dict = Depends(get_current_user)):
             
             # Test API connection
             try:
-                # Try plain text keys first (temporary), then encrypted
-                api_key = user_data.get('binance_api_key_plain')
-                api_secret = user_data.get('binance_api_secret_plain')
+                from app.utils.crypto import decrypt_data
+                from app.binance_client import BinanceClient
                 
-                if not api_key or not api_secret:
-                    # Try encrypted keys
-                    try:
-                        from app.utils.crypto import decrypt_data
-                        encrypted_api_key = user_data.get('binance_api_key')
-                        encrypted_api_secret = user_data.get('binance_api_secret')
-                        
-                        if encrypted_api_key and encrypted_api_secret:
-                            api_key = decrypt_data(encrypted_api_key)
-                            api_secret = decrypt_data(encrypted_api_secret)
-                    except Exception as decrypt_error:
-                        logger.error(f"Decryption failed: {decrypt_error}")
-                        api_key = None
-                        api_secret = None
+                encrypted_api_key = user_data.get('binance_api_key')
+                encrypted_api_secret = user_data.get('binance_api_secret')
                 
-                if api_key and api_secret:
-                    from app.binance_client import BinanceClient
-                    test_client = BinanceClient(api_key, api_secret)
+                if encrypted_api_key and encrypted_api_secret:
+                    api_key = decrypt_data(encrypted_api_key)
+                    api_secret = decrypt_data(encrypted_api_secret)
+                    
+                    if api_key and api_secret:
+                        test_client = BinanceClient(api_key, api_secret)
                         await test_client.initialize()
                         balance = await test_client.get_account_balance(use_cache=True)
                         await test_client.close()
@@ -1315,28 +1286,15 @@ async def close_position(request: dict, current_user: dict = Depends(get_current
         
         # Real position closing
         try:
-            # Try plain text keys first (temporary), then encrypted
-            api_key = user_data.get('binance_api_key_plain')
-            api_secret = user_data.get('binance_api_secret_plain')
-            
-            if not api_key or not api_secret:
-                # Try encrypted keys
-                try:
-                    from app.utils.crypto import decrypt_data
-                    encrypted_api_key = user_data.get('binance_api_key')
-                    encrypted_api_secret = user_data.get('binance_api_secret')
-                    
-                    if encrypted_api_key and encrypted_api_secret:
-                        api_key = decrypt_data(encrypted_api_key)
-                        api_secret = decrypt_data(encrypted_api_secret)
-                except Exception as decrypt_error:
-                    logger.error(f"Decryption failed: {decrypt_error}")
-                    raise HTTPException(status_code=400, detail="Could not decrypt API keys")
-            
-            if not api_key or not api_secret:
-                raise HTTPException(status_code=400, detail="API keys not found")
-            
+            from app.utils.crypto import decrypt_data
             from app.binance_client import BinanceClient
+            
+            encrypted_api_key = user_data.get('binance_api_key')
+            encrypted_api_secret = user_data.get('binance_api_secret')
+            
+            api_key = decrypt_data(encrypted_api_key)
+            api_secret = decrypt_data(encrypted_api_secret)
+            
             client = BinanceClient(api_key, api_secret)
             await client.initialize()
             
@@ -1375,13 +1333,14 @@ async def close_position(request: dict, current_user: dict = Depends(get_current
                     logger.error(f"Trade logging error: {log_error}")
                 
                 # Update user stats
+                from firebase_admin import db
                 current_trades = user_data.get('total_trades', 0)
                 current_pnl = user_data.get('total_pnl', 0.0)
                 
                 user_ref.update({
                     'total_trades': current_trades + 1,
                     'total_pnl': current_pnl + pnl,
-                    'last_trade_time': firebase_db.ServerValue.TIMESTAMP
+                    'last_trade_time': db.SERVER_TIMESTAMP
                 })
                 
                 await client.close()
@@ -1479,31 +1438,22 @@ async def get_bot_api_status(current_user: dict = Depends(get_current_user)):
             
             # Test connection
             try:
-                # Try plain text keys first (temporary), then encrypted
-                api_key = user_data.get('binance_api_key_plain')
-                api_secret = user_data.get('binance_api_secret_plain')
+                from app.utils.crypto import decrypt_data
+                from app.binance_client import BinanceClient
                 
-                if not api_key or not api_secret:
-                    # Try encrypted keys
-                    try:
-                        from app.utils.crypto import decrypt_data
-                        encrypted_api_key = user_data.get('binance_api_key')
-                        encrypted_api_secret = user_data.get('binance_api_secret')
-                        
-                        if encrypted_api_key and encrypted_api_secret:
-                            api_key = decrypt_data(encrypted_api_key)
-                            api_secret = decrypt_data(encrypted_api_secret)
-                    except Exception as decrypt_error:
-                        logger.error(f"Decryption failed: {decrypt_error}")
-                        api_key = None
-                        api_secret = None
+                encrypted_api_key = user_data.get('binance_api_key')
+                encrypted_api_secret = user_data.get('binance_api_secret')
                 
-                if api_key and api_secret:
-                    return {
-                        "hasApiKeys": True,
-                        "isConnected": True,
-                        "message": "API keys active"
-                    }
+                if encrypted_api_key and encrypted_api_secret:
+                    api_key = decrypt_data(encrypted_api_key)
+                    api_secret = decrypt_data(encrypted_api_secret)
+                    
+                    if api_key and api_secret:
+                        return {
+                            "hasApiKeys": True,
+                            "isConnected": True,
+                            "message": "API keys active"
+                        }
                     else:
                         return {
                             "hasApiKeys": True,
@@ -1595,10 +1545,11 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
                     raise HTTPException(status_code=400, detail=result["error"])
                 
                 # Update user data
+                from firebase_admin import db
                 user_ref.update({
                     "bot_active": True,
                     "bot_symbol": request.get('symbol', 'BTCUSDT'),
-                    "bot_start_time": firebase_db.ServerValue.TIMESTAMP
+                    "bot_start_time": db.SERVER_TIMESTAMP
                 })
                 
                 return {
@@ -1646,10 +1597,11 @@ async def stop_bot(current_user: dict = Depends(get_current_user)):
         # Update user data
         if firebase_initialized and firebase_db:
             try:
+                from firebase_admin import db
                 user_ref = firebase_db.reference(f'users/{user_id}')
                 user_ref.update({
                     "bot_active": False,
-                    "bot_stop_time": firebase_db.ServerValue.TIMESTAMP
+                    "bot_stop_time": db.SERVER_TIMESTAMP
                 })
             except Exception as db_error:
                 logger.error(f"Database update error: {db_error}")
