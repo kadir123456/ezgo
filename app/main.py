@@ -1,24 +1,61 @@
-from binance.client import Client
-from binance.exceptions import BinanceAPIException, BinanceRequestException
+import logging
+import time
+import traceback
+import sys
+import json
+import os
+import re
+from typing import Optional
+from datetime import datetime, timezone, timedelta
+
+# ------------------------------
+# Üçüncü Parti Kütüphaneler
+# ------------------------------
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.exceptions import RequestValidationError
-from datetime import datetime, timezone, timedelta
+
+from binance.client import Client
+from binance.exceptions import BinanceAPIException, BinanceRequestException
+
+# ------------------------------
+# Lokal Modüller
+# ------------------------------
 from app.config import settings
 from app.utils.metrics import metrics, get_metrics_data, get_metrics_content_type
-import logging
-import time
-import traceback
-import sys
-from typing import Optional
-import json
-import os
-import re
+from app.routes import auth, bot, user, config
 
-# Setup logging
+# ------------------------------
+# FastAPI Uygulaması
+# ------------------------------
+app = FastAPI(title="My Trading API")
+
+# CORS middleware eklemek istersen
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Prod için spesifik domain gir
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Statik dosya klasörü
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# ------------------------------
+# Router’ların eklenmesi
+# ------------------------------
+app.include_router(auth.router)
+app.include_router(bot.router)
+app.include_router(user.router)
+app.include_router(config.router)   # ✅ burası önemli
+
+# ------------------------------
+# Logging Ayarları
+# ------------------------------
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
