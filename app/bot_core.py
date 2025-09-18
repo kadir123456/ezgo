@@ -15,11 +15,12 @@ logger = get_logger("bot_core")
 class BotCore:
     def __init__(self, user_id: str, binance_client, bot_settings: dict):
         """
-        Her kullanıcı için ayrı BotCore instance'ı
+        Complete Trading Bot Core - Mevcut BinanceClient ile uyumlu
         """
         self.user_id = user_id
-        self.binance_client = binance_client  # Kullanıcıya özel Binance client
+        self.binance_client = binance_client  # Mevcut BinanceClient
         self.bot_settings = bot_settings
+        self._initialized = False
         
         # Bot durumu - kullanıcıya özel
         self.status = {
@@ -36,24 +37,43 @@ class BotCore:
             "position_pnl": 0.0,
             "last_check_time": None,
             "total_trades": 0,
-            "total_pnl": 0.0
+            "total_pnl": 0.0,
+            "last_trade_time": None,
+            "last_signal": "HOLD",
+            "entry_price": 0.0,
+            "current_price": 0.0,
+            "unrealized_pnl": 0.0
         }
         
+        # Trading data
         self.klines_data = []
+        self.current_price = None
+        self.symbol_validated = False
+        self.min_notional = 5.0
+        
+        # Precision settings
+        self.quantity_precision = 3
+        self.price_precision = 2
+        
+        # WebSocket ve task management
         self._stop_requested = False
         self._websocket_task = None
         self._monitor_task = None
-        self.quantity_precision = 3  # Default değer
-        self.price_precision = 2     # Default değer
+        self._strategy_task = None
         
-        # WebSocket veri depolama
-        self.current_price = None
-        self.symbol_validated = False
+        # Trading controls
+        self.last_trade_time = 0
+        self.min_trade_interval = 60  # 1 dakika
+        self.consecutive_losses = 0
+        self.max_consecutive_losses = 3
+        
+        # Performance tracking
+        self.trade_history = []
         
         logger.info(f"BotCore created for user {user_id} with symbol {self.status['symbol']}")
 
     async def start(self):
-        """Kullanıcıya özel bot başlatma - WebSocket odaklı"""
+        """Bot başlatma - mevcut BinanceClient ile uyumlu"""
         if self.status["is_running"]:
             logger.warning(f"Bot already running for user {self.user_id}")
             return
@@ -65,113 +85,164 @@ class BotCore:
         logger.info(f"Starting bot for user {self.user_id} on {self.status['symbol']}")
         
         try:
-            # 1. Binance client'ı başlat
-            await self.binance_client.initialize()
-            logger.info(f"Binance client initialized for user {self.user_id}")
+            # 1. Binance client initialization
+            await self._initialize_binance_client()
             
-            # 2. Symbol bilgilerini WebSocket'ten al (opsiyonel REST validation)
-            try:
-                symbol_info = await self.binance_client.get_symbol_info(self.status["symbol"])
-                if symbol_info:
-                    # Precision hesaplama
-                    self.quantity_precision = self._get_precision_from_filter(symbol_info, 'LOT_SIZE', 'stepSize')
-                    self.price_precision = self._get_precision_from_filter(symbol_info, 'PRICE_FILTER', 'tickSize')
-                    logger.info(f"Symbol info loaded for user {self.user_id}: precision={self.quantity_precision}")
-                else:
-                    logger.warning(f"Symbol info not available via REST for user {self.user_id}, using WebSocket")
-            except Exception as rest_error:
-                logger.warning(f"REST symbol validation failed for user {self.user_id}: {rest_error}")
-                logger.info("Continuing with WebSocket-only approach...")
+            # 2. Symbol validation
+            await self._setup_symbol_info()
             
-            # 3. Hesap bakiyesi kontrolü
-            try:
-                self.status["account_balance"] = await self.binance_client.get_account_balance(use_cache=False)
-                logger.info(f"Account balance for user {self.user_id}: {self.status['account_balance']} USDT")
-            except Exception as balance_error:
-                logger.warning(f"Balance check failed for user {self.user_id}: {balance_error}")
-                self.status["account_balance"] = 0.0
+            # 3. Account validation
+            await self._validate_account()
             
-            # 4. Kaldıraç ayarlama (opsiyonel)
-            try:
-                await self.binance_client.set_leverage(self.status["symbol"], self.status["leverage"])
-                logger.info(f"Leverage set for user {self.user_id}: {self.status['leverage']}x")
-            except Exception as leverage_error:
-                logger.warning(f"Leverage setting failed for user {self.user_id}: {leverage_error}")
+            # 4. Cleanup existing orders
+            await self._cleanup_existing_orders()
             
-            # 5. Geçmiş veri çekme (opsiyonel)
-            try:
-                klines = await self.binance_client.get_historical_klines(
-                    self.status["symbol"], 
-                    self.status["timeframe"], 
-                    limit=50
-                )
-                if klines:
-                    self.klines_data = klines
-                    logger.info(f"Historical data loaded for user {self.user_id}: {len(klines)} candles")
-                else:
-                    logger.warning(f"No historical data for user {self.user_id}, will use WebSocket data")
-            except Exception as klines_error:
-                logger.warning(f"Historical data loading failed for user {self.user_id}: {klines_error}")
+            # 5. Load historical data
+            await self._load_historical_data()
             
-            # 6. Mevcut pozisyon kontrolü (opsiyonel)
-            try:
-                open_positions = await self.binance_client.get_open_positions(self.status["symbol"], use_cache=False)
-                if open_positions:
-                    position = open_positions[0]
-                    position_amt = float(position['positionAmt'])
-                    if position_amt > 0:
-                        self.status["position_side"] = "LONG"
-                    elif position_amt < 0:
-                        self.status["position_side"] = "SHORT"
-                    logger.info(f"Existing position found for user {self.user_id}: {self.status['position_side']}")
-            except Exception as position_error:
-                logger.warning(f"Position check failed for user {self.user_id}: {position_error}")
+            # 6. Start real-time components
+            await self._start_realtime_components()
             
-            # 7. WebSocket ve monitoring başlat - ana veri kaynağı
-            self._websocket_task = asyncio.create_task(self._websocket_loop())
-            self._monitor_task = asyncio.create_task(self._monitor_loop())
-            
-            self.status["status_message"] = f"Bot aktif - {self.status['symbol']} WebSocket'ten izleniyor"
+            self.status["status_message"] = f"Bot aktif - {self.status['symbol']} (WebSocket + Trading)"
+            self._initialized = True
             logger.info(f"Bot started successfully for user {self.user_id} with WebSocket data stream")
             
         except Exception as e:
             error_msg = f"Bot başlatma hatası: {e}"
             logger.error(f"Bot start failed for user {self.user_id}: {e}")
+            logger.error(traceback.format_exc())
             self.status["status_message"] = error_msg
             self.status["is_running"] = False
             await self.stop()
 
+    async def _initialize_binance_client(self):
+        """BinanceClient başlatma"""
+        try:
+            if not self._initialized:
+                init_result = await self.binance_client.initialize()
+                if not init_result:
+                    raise Exception("BinanceClient initialization failed")
+            logger.info(f"Binance client initialized for user {self.user_id}")
+        except Exception as e:
+            raise Exception(f"BinanceClient initialization failed: {e}")
+
+    async def _setup_symbol_info(self):
+        """Symbol bilgileri setup"""
+        try:
+            symbol_info = await self.binance_client.get_symbol_info(self.status["symbol"])
+            if symbol_info:
+                self.quantity_precision = self._get_precision_from_filter(symbol_info, 'LOT_SIZE', 'stepSize')
+                self.price_precision = self._get_precision_from_filter(symbol_info, 'PRICE_FILTER', 'tickSize')
+                
+                for f in symbol_info.get('filters', []):
+                    if f.get('filterType') == 'MIN_NOTIONAL':
+                        self.min_notional = float(f.get('notional', 5.0))
+                        break
+                
+                self.symbol_validated = True
+                logger.info(f"Symbol {self.status['symbol']} configured - qty_precision: {self.quantity_precision}, price_precision: {self.price_precision}")
+            else:
+                logger.warning(f"Symbol info not available via REST for user {self.user_id}, using WebSocket")
+                
+        except Exception as e:
+            logger.warning(f"Symbol setup failed for user {self.user_id}: {e}")
+
+    async def _validate_account(self):
+        """Account validation"""
+        try:
+            # Balance check
+            self.status["account_balance"] = await self.binance_client.get_account_balance(use_cache=False)
+            if self.status["account_balance"] < self.status["order_size"]:
+                logger.warning(f"Low balance warning for user {self.user_id}: {self.status['account_balance']} < {self.status['order_size']}")
+            
+            logger.info(f"Account balance for user {self.user_id}: {self.status['account_balance']} USDT")
+            
+            # Leverage setting
+            leverage_result = await self.binance_client.set_leverage(self.status["symbol"], self.status["leverage"])
+            if leverage_result:
+                logger.info(f"Leverage set for user {self.user_id}: {self.status['leverage']}x")
+            else:
+                logger.warning(f"Could not set leverage for user {self.user_id}")
+                
+        except Exception as e:
+            logger.error(f"Account validation failed for user {self.user_id}: {e}")
+
+    async def _cleanup_existing_orders(self):
+        """Mevcut orderları temizle"""
+        try:
+            await self.binance_client.cancel_all_orders_safe(self.status["symbol"])
+            
+            # Mevcut pozisyon kontrolü
+            open_positions = await self.binance_client.get_open_positions(self.status["symbol"], use_cache=False)
+            if open_positions:
+                position = open_positions[0]
+                position_amt = float(position.get('positionAmt', 0))
+                if abs(position_amt) > 0:
+                    if position_amt > 0:
+                        self.status["position_side"] = "LONG"
+                    else:
+                        self.status["position_side"] = "SHORT"
+                    
+                    self.status["entry_price"] = float(position.get('entryPrice', 0))
+                    self.status["unrealized_pnl"] = float(position.get('unRealizedProfit', 0))
+                    logger.info(f"Existing position found for user {self.user_id}: {self.status['position_side']} at {self.status['entry_price']}")
+                    
+        except Exception as e:
+            logger.warning(f"Cleanup failed for user {self.user_id}: {e}")
+
+    async def _load_historical_data(self):
+        """Historical data loading"""
+        try:
+            klines = await self.binance_client.get_historical_klines(
+                self.status["symbol"], 
+                self.status["timeframe"], 
+                limit=50
+            )
+            if klines and len(klines) > 20:
+                self.klines_data = klines
+                signal = trading_strategy.analyze_klines(self.klines_data)
+                self.status["last_signal"] = signal
+                logger.info(f"Historical data loaded for user {self.user_id}: {len(klines)} candles")
+            else:
+                logger.warning(f"Insufficient historical data for user {self.user_id}")
+                
+        except Exception as e:
+            logger.warning(f"Historical data loading failed for user {self.user_id}: {e}")
+
+    async def _start_realtime_components(self):
+        """Real-time components başlat"""
+        self._websocket_task = asyncio.create_task(self._websocket_loop())
+        self._monitor_task = asyncio.create_task(self._monitor_loop())
+        self._strategy_task = asyncio.create_task(self._strategy_loop())
+        
+        logger.info(f"Real-time components started for user {self.user_id}")
+
     async def stop(self):
-        """Kullanıcıya özel bot durdurma"""
+        """Bot durdurma"""
         if not self.status["is_running"]:
             return
             
         logger.info(f"Stopping bot for user {self.user_id}")
         self._stop_requested = True
         
-        # WebSocket task'ını durdur
-        if self._websocket_task and not self._websocket_task.done():
-            self._websocket_task.cancel()
-            try:
-                await self._websocket_task
-            except asyncio.CancelledError:
-                pass
+        # Task cleanup
+        tasks = [self._websocket_task, self._monitor_task, self._strategy_task]
+        for task in tasks:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
         
-        # Monitor task'ını durdur
-        if self._monitor_task and not self._monitor_task.done():
-            self._monitor_task.cancel()
-            try:
-                await self._monitor_task
-            except asyncio.CancelledError:
-                pass
-        
-        # Binance client'ı kapat
-        if self.binance_client:
-            await self.binance_client.close()
+        # Final cleanup
+        try:
+            await self.binance_client.cancel_all_orders_safe(self.status["symbol"])
+        except:
+            pass
         
         self.status.update({
             "is_running": False,
-            "position_side": None,
             "status_message": "Bot durduruldu.",
             "last_check_time": datetime.now(timezone.utc).isoformat()
         })
@@ -179,19 +250,16 @@ class BotCore:
         logger.info(f"Bot stopped for user {self.user_id}")
 
     async def _websocket_loop(self):
-        """WebSocket veri akışı - hem ticker hem kline verisi"""
+        """WebSocket data stream"""
         symbol = self.status["symbol"].lower()
         timeframe = self.status["timeframe"]
         
-        # Kombineli stream: hem fiyat hem kline verisi
         ticker_stream = f"{symbol}@ticker"
         kline_stream = f"{symbol}@kline_{timeframe}"
-        
-        # WebSocket URL - multiple streams
         ws_url = f"wss://stream.binance.com:9443/stream?streams={ticker_stream}/{kline_stream}"
         
         reconnect_attempts = 0
-        max_reconnects = 10
+        max_reconnects = 15
         
         logger.info(f"Starting combined WebSocket for user {self.user_id} on {symbol}")
         
@@ -231,29 +299,20 @@ class BotCore:
                     if reconnect_attempts < max_reconnects:
                         logger.info(f"Reconnecting WebSocket for user {self.user_id} in {backoff_time}s")
                         await asyncio.sleep(backoff_time)
-                    else:
-                        logger.error(f"Max WebSocket reconnect attempts reached for user {self.user_id}")
-                        await self.stop()
 
     async def _handle_websocket_message(self, message: str):
-        """WebSocket mesaj işleme - hem ticker hem kline"""
+        """WebSocket message handling"""
         try:
             data = json.loads(message)
             
-            # Multi-stream formatında data gelir
             if 'stream' in data and 'data' in data:
                 stream = data['stream']
                 stream_data = data['data']
                 
-                # Ticker verisi (fiyat güncellemeleri)
                 if '@ticker' in stream:
                     await self._handle_ticker_data(stream_data)
-                
-                # Kline verisi (mum grafik verileri)
                 elif '@kline' in stream:
                     await self._handle_kline_data(stream_data)
-                    
-            # Tek stream formatı (backward compatibility)
             else:
                 if 'e' in data:
                     if data['e'] == '24hrTicker':
@@ -265,45 +324,61 @@ class BotCore:
             logger.error(f"WebSocket message parsing error for user {self.user_id}: {e}")
 
     async def _handle_ticker_data(self, ticker_data: dict):
-        """Ticker (fiyat) verisi işleme"""
+        """Ticker data handling"""
         try:
-            # Güncel fiyatı güncelle
-            self.current_price = float(ticker_data['c'])  # Close price
+            self.current_price = float(ticker_data['c'])
+            self.status["current_price"] = self.current_price
             
-            # İlk kez sembol validation
             if not self.symbol_validated:
                 self.symbol_validated = True
                 logger.info(f"Symbol {self.status['symbol']} validated via WebSocket for user {self.user_id}")
+            
+            # Real-time PnL calculation
+            if self.status["position_side"] and self.status["entry_price"]:
+                await self._calculate_realtime_pnl()
                 
-                # İlk fiyat geldiğinde bot'un tamamen hazır olduğunu belirt
-                if self.status["status_message"] == f"Bot aktif - {self.status['symbol']} WebSocket'ten izleniyor":
-                    self.status["status_message"] = f"Bot aktif - {self.status['symbol']} (${self.current_price})"
-            
-            logger.debug(f"Price update for user {self.user_id}: {self.current_price}")
-            
         except Exception as e:
             logger.error(f"Ticker data handling error for user {self.user_id}: {e}")
 
-    async def _handle_kline_data(self, kline_data: dict):
-        """Kline (mum grafik) verisi işleme"""
+    async def _calculate_realtime_pnl(self):
+        """Real-time PnL calculation"""
         try:
-            # Kline objesi içinden veri çıkar
+            if self.status["position_side"] and self.current_price and self.status["entry_price"]:
+                entry_price = self.status["entry_price"]
+                current_price = self.current_price
+                order_size = self.status["order_size"]
+                leverage = self.status["leverage"]
+                
+                if self.status["position_side"] == "LONG":
+                    pnl_percentage = ((current_price - entry_price) / entry_price) * 100 * leverage
+                else:  # SHORT
+                    pnl_percentage = ((entry_price - current_price) / entry_price) * 100 * leverage
+                
+                unrealized_pnl = (order_size * pnl_percentage) / 100
+                self.status["unrealized_pnl"] = unrealized_pnl
+                
+        except Exception as e:
+            logger.error(f"PnL calculation error for user {self.user_id}: {e}")
+
+    async def _handle_kline_data(self, kline_data: dict):
+        """Kline data handling"""
+        try:
             if 'k' in kline_data:
                 kline_info = kline_data['k']
             else:
                 kline_info = kline_data
             
-            # Sadece kapanan mumları işle
+            # Only closed candles
             if not kline_info.get('x', False):
                 return
             
             close_price = float(kline_info['c'])
-            logger.info(f"New candle closed for user {self.user_id}: ${close_price}")
-            
-            # Güncel fiyatı da güncelle
             self.current_price = close_price
+            self.status["current_price"] = close_price
             
-            # Kline data güncelle
+            logger.info(f"New candle closed for user {self.user_id}: ${close_price:.2f}")
+            
+            # Update klines data
             new_kline = [
                 int(kline_info['t']),    # Open time
                 str(kline_info['o']),    # Open
@@ -319,100 +394,142 @@ class BotCore:
                 '0'                      # Ignore
             ]
             
-            # Klines listesini güncelle
-            if len(self.klines_data) >= 50:
+            # Maintain klines buffer
+            if len(self.klines_data) >= 100:
                 self.klines_data.pop(0)
             self.klines_data.append(new_kline)
             
-            # Yeterli veri varsa strateji analizi yap
-            if len(self.klines_data) >= 20:  # Minimum veri gereksinimi
+            # Trigger strategy analysis
+            if len(self.klines_data) >= 20:
                 signal = trading_strategy.analyze_klines(self.klines_data)
-                logger.info(f"Strategy signal for user {self.user_id}: {signal}")
-                
-                # Trading mantığı
-                await self._handle_trading_signal(signal, close_price)
+                if signal != self.status["last_signal"]:
+                    logger.info(f"Strategy signal changed for user {self.user_id}: {self.status['last_signal']} -> {signal}")
+                    self.status["last_signal"] = signal
             else:
                 logger.info(f"Collecting data for user {self.user_id}: {len(self.klines_data)}/20 candles")
             
         except Exception as e:
             logger.error(f"Kline data handling error for user {self.user_id}: {e}")
 
-    async def _handle_trading_signal(self, signal: str, current_price: float):
-        """Trading sinyal işleme - kullanıcıya özel"""
+    async def _strategy_loop(self):
+        """Main strategy execution loop"""
+        logger.info(f"Strategy loop started for user {self.user_id}")
+        
+        while not self._stop_requested and self.status["is_running"]:
+            try:
+                if len(self.klines_data) >= 20 and self.current_price:
+                    await self._execute_trading_strategy()
+                
+                await asyncio.sleep(15)  # Strategy check interval
+                
+            except Exception as e:
+                logger.error(f"Strategy loop error for user {self.user_id}: {e}")
+                await asyncio.sleep(30)
+
+    async def _execute_trading_strategy(self):
+        """Main trading strategy execution"""
         try:
+            current_time = time.time()
+            
+            # Rate limiting check
+            if current_time - self.last_trade_time < self.min_trade_interval:
+                return
+            
+            # Consecutive losses protection
+            if self.consecutive_losses >= self.max_consecutive_losses:
+                logger.warning(f"Max consecutive losses reached for user {self.user_id}, pausing trading")
+                return
+            
+            signal = self.status["last_signal"]
             current_position = self.status["position_side"]
             
-            # Sinyal yoksa bekle
+            # No signal, do nothing
             if signal == "HOLD":
                 return
             
-            # Pozisyon yok, yeni sinyal var
-            if not current_position and signal != "HOLD":
-                await self._open_position(signal, current_price)
+            # No position, open new position
+            if not current_position and signal in ["LONG", "SHORT"]:
+                await self._open_position(signal, self.current_price)
                 return
             
-            # Mevcut pozisyon var, ters sinyal geldi
-            if current_position and signal != current_position and signal != "HOLD":
-                await self._flip_position(signal, current_price)
-                return
+            # Has position, check for exit or flip
+            if current_position:
+                # Opposite signal - flip position
+                if signal != current_position and signal in ["LONG", "SHORT"]:
+                    await self._flip_position(signal, self.current_price)
+                    return
+                
+                # Check stop loss / take profit
+                await self._check_exit_conditions()
                 
         except Exception as e:
-            logger.error(f"Trading signal handling error for user {self.user_id}: {e}")
+            logger.error(f"Trading strategy execution error for user {self.user_id}: {e}")
 
     async def _open_position(self, signal: str, entry_price: float):
-        """Yeni pozisyon açma - kullanıcıya özel"""
+        """Position opening with existing BinanceClient"""
         try:
-            logger.info(f"Opening {signal} position for user {self.user_id}")
+            logger.info(f"Opening {signal} position for user {self.user_id} at ${entry_price:.2f}")
             
-            # Yetim emir temizliği
+            # Pre-trade cleanup
             await self.binance_client.cancel_all_orders_safe(self.status["symbol"])
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.5)
             
-            # Pozisyon büyüklüğü hesapla
+            # Position size calculation
             order_size = self.status["order_size"]
             leverage = self.status["leverage"]
-            quantity = self._format_quantity((order_size * leverage) / entry_price)
+            quantity = self._calculate_position_size(order_size, leverage, entry_price)
             
             if quantity <= 0:
                 logger.error(f"Invalid quantity calculated for user {self.user_id}: {quantity}")
                 return False
             
-            # Market order aç
-            side = "BUY" if signal == "LONG" else "SELL"
-            order = await self.binance_client.create_market_order_with_sl_tp(
-                self.status["symbol"], 
-                side, 
-                quantity, 
-                entry_price, 
-                self.price_precision
-            )
+            # Check minimum notional
+            notional = quantity * entry_price
+            if notional < self.min_notional:
+                logger.error(f"Order below minimum notional for user {self.user_id}: {notional} < {self.min_notional}")
+                return False
             
-            if order:
-                self.status["position_side"] = signal
-                self.status["status_message"] = f"{signal} pozisyonu açıldı: ${entry_price}"
-                self.status["total_trades"] += 1
+            # Place market order using existing method
+            side = "BUY" if signal == "LONG" else "SELL"
+            
+            try:
+                order_result = await self.binance_client.create_market_order_with_sl_tp(
+                    self.status["symbol"], 
+                    side, 
+                    quantity, 
+                    entry_price, 
+                    self.price_precision
+                )
                 
-                # Firebase'e kaydet
-                try:
-                    from app.main import firebase_db, firebase_initialized
-                    if firebase_initialized and firebase_db:
-                        trades_ref = firebase_db.reference('trades')
-                        trades_ref.push({
-                            "user_id": self.user_id,
-                            "symbol": self.status["symbol"],
-                            "side": signal,
-                            "quantity": quantity,
-                            "price": entry_price,
-                            "status": "OPENED",
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        })
-                except Exception as log_error:
-                    logger.error(f"Trade logging error: {log_error}")
-                
-                logger.info(f"Position opened successfully for user {self.user_id}")
-                return True
-            else:
-                logger.error(f"Failed to open position for user {self.user_id}")
+                if order_result:
+                    # Update status
+                    self.status.update({
+                        "position_side": signal,
+                        "entry_price": entry_price,
+                        "status_message": f"{signal} pozisyonu açıldı: ${entry_price:.2f}",
+                        "total_trades": self.status["total_trades"] + 1,
+                        "last_trade_time": time.time()
+                    })
+                    
+                    self.last_trade_time = time.time()
+                    
+                    # Log trade
+                    await self._log_trade({
+                        "action": "OPEN",
+                        "side": signal,
+                        "quantity": quantity,
+                        "price": entry_price,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    
+                    logger.info(f"Position opened successfully for user {self.user_id}: {signal} at ${entry_price:.2f}")
+                    return True
+                else:
+                    logger.error(f"Failed to open position for user {self.user_id}")
+                    return False
+                    
+            except Exception as order_error:
+                logger.error(f"Order placement error for user {self.user_id}: {order_error}")
                 return False
                 
         except Exception as e:
@@ -420,90 +537,173 @@ class BotCore:
             return False
 
     async def _flip_position(self, new_signal: str, current_price: float):
-        """Pozisyon çevirme - kullanıcıya özel"""
+        """Position flipping"""
         try:
             logger.info(f"Flipping position for user {self.user_id}: {self.status['position_side']} -> {new_signal}")
             
-            # Mevcut pozisyonu kapat
-            open_positions = await self.binance_client.get_open_positions(self.status["symbol"], use_cache=False)
-            if open_positions:
-                position = open_positions[0]
-                position_amt = float(position['positionAmt'])
-                side_to_close = 'SELL' if position_amt > 0 else 'BUY'
-                
-                # PnL hesapla
-                pnl = await self.binance_client.get_last_trade_pnl(self.status["symbol"])
-                self.status["total_pnl"] += pnl
-                
-                # Pozisyonu kapat
-                close_result = await self.binance_client.close_position(
-                    self.status["symbol"], 
-                    position_amt, 
-                    side_to_close
-                )
-                
-                if close_result:
-                    # Firebase'e kaydet
-                    try:
-                        from app.main import firebase_db, firebase_initialized
-                        if firebase_initialized and firebase_db:
-                            trades_ref = firebase_db.reference('trades')
-                            trades_ref.push({
-                                "user_id": self.user_id,
-                                "symbol": self.status["symbol"],
-                                "pnl": pnl,
-                                "status": "CLOSED_BY_FLIP",
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            })
-                    except Exception as log_error:
-                        logger.error(f"Trade logging error: {log_error}")
-                    
-                    await asyncio.sleep(1)
-                    
-                    # Yeni pozisyon aç
-                    await self._open_position(new_signal, current_price)
-                    
+            # Close current position first
+            close_result = await self._close_position("FLIP")
+            
+            if close_result:
+                await asyncio.sleep(1)  # Brief pause
+                # Open new position
+                await self._open_position(new_signal, current_price)
+            
         except Exception as e:
             logger.error(f"Position flip error for user {self.user_id}: {e}")
 
+    async def _close_position(self, reason: str = "SIGNAL"):
+        """Position closing using existing BinanceClient"""
+        try:
+            if not self.status["position_side"]:
+                return False
+                
+            logger.info(f"Closing {self.status['position_side']} position for user {self.user_id} - Reason: {reason}")
+            
+            # Get current position
+            open_positions = await self.binance_client.get_open_positions(self.status["symbol"], use_cache=False)
+            if not open_positions:
+                self.status["position_side"] = None
+                return True
+            
+            position = open_positions[0]
+            position_amt = float(position.get('positionAmt', 0))
+            
+            if abs(position_amt) == 0:
+                self.status["position_side"] = None
+                return True
+            
+            # Close position using existing method
+            side_to_close = 'SELL' if position_amt > 0 else 'BUY'
+            
+            close_result = await self.binance_client.close_position(
+                self.status["symbol"], 
+                position_amt, 
+                side_to_close
+            )
+            
+            if close_result:
+                # Calculate PnL
+                pnl = await self.binance_client.get_last_trade_pnl(self.status["symbol"])
+                
+                # Update status
+                self.status.update({
+                    "position_side": None,
+                    "entry_price": 0.0,
+                    "unrealized_pnl": 0.0,
+                    "total_pnl": self.status["total_pnl"] + pnl,
+                    "status_message": f"Pozisyon kapatıldı - PnL: ${pnl:.2f}"
+                })
+                
+                # Track consecutive losses
+                if pnl < 0:
+                    self.consecutive_losses += 1
+                else:
+                    self.consecutive_losses = 0
+                
+                # Log trade
+                await self._log_trade({
+                    "action": "CLOSE",
+                    "reason": reason,
+                    "pnl": pnl,
+                    "price": self.current_price,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+                
+                logger.info(f"Position closed for user {self.user_id} - PnL: ${pnl:.2f}")
+                return True
+            else:
+                logger.error(f"Failed to close position for user {self.user_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Position closing error for user {self.user_id}: {e}")
+            return False
+
+    async def _check_exit_conditions(self):
+        """Exit conditions check"""
+        try:
+            if not self.status["position_side"] or not self.current_price or not self.status["entry_price"]:
+                return
+            
+            entry_price = self.status["entry_price"]
+            current_price = self.current_price
+            position_side = self.status["position_side"]
+            
+            # Calculate percentage change
+            if position_side == "LONG":
+                pct_change = ((current_price - entry_price) / entry_price) * 100
+            else:  # SHORT
+                pct_change = ((entry_price - current_price) / entry_price) * 100
+            
+            # Stop loss check
+            if pct_change <= -self.status["stop_loss"]:
+                logger.info(f"Stop loss triggered for user {self.user_id}: {pct_change:.2f}%")
+                await self._close_position("STOP_LOSS")
+                return
+            
+            # Take profit check
+            if pct_change >= self.status["take_profit"]:
+                logger.info(f"Take profit triggered for user {self.user_id}: {pct_change:.2f}%")
+                await self._close_position("TAKE_PROFIT")
+                return
+                
+        except Exception as e:
+            logger.error(f"Exit conditions check error for user {self.user_id}: {e}")
+
     async def _monitor_loop(self):
-        """Pozisyon monitoring - kullanıcıya özel"""
+        """Monitoring loop"""
         while not self._stop_requested and self.status["is_running"]:
             try:
-                # Hesap bakiyesi güncelle
+                # Update account balance
                 try:
                     self.status["account_balance"] = await self.binance_client.get_account_balance(use_cache=True)
-                except Exception as balance_error:
-                    logger.debug(f"Balance update error for user {self.user_id}: {balance_error}")
+                except Exception as e:
+                    logger.debug(f"Balance update error for user {self.user_id}: {e}")
                 
-                # Pozisyon PnL güncelle
+                # Update position PnL
                 if self.status["position_side"]:
                     try:
                         self.status["position_pnl"] = await self.binance_client.get_position_pnl(
                             self.status["symbol"], 
                             use_cache=True
                         )
-                    except Exception as pnl_error:
-                        logger.debug(f"PnL update error for user {self.user_id}: {pnl_error}")
+                    except Exception as e:
+                        logger.debug(f"PnL update error for user {self.user_id}: {e}")
+                
+                # Update status message
+                await self._update_status_message()
+                
+                # Update user data in Firebase
+                await self._update_user_data()
                 
                 self.status["last_check_time"] = datetime.now(timezone.utc).isoformat()
                 
-                # Status message güncelle (WebSocket fiyat ile)
-                if self.current_price and self.symbol_validated:
-                    position_text = f" - {self.status['position_side']}" if self.status["position_side"] else ""
-                    self.status["status_message"] = f"Bot aktif - {self.status['symbol']} (${self.current_price}){position_text}"
-                
-                # Kullanıcı verilerini Firebase'de güncelle
-                await self._update_user_data()
-                
-                await asyncio.sleep(30)  # 30 saniyede bir güncelle
+                await asyncio.sleep(30)  # Monitor interval
                 
             except Exception as e:
                 logger.error(f"Monitor loop error for user {self.user_id}: {e}")
                 await asyncio.sleep(10)
 
+    async def _update_status_message(self):
+        """Update status message"""
+        try:
+            if self.current_price and self.symbol_validated:
+                position_text = ""
+                if self.status["position_side"]:
+                    pnl_text = f" (PnL: ${self.status.get('unrealized_pnl', 0):.2f})"
+                    position_text = f" - {self.status['position_side']}{pnl_text}"
+                
+                signal_text = f" - Signal: {self.status['last_signal']}"
+                price_text = f" (${self.current_price:.2f})"
+                
+                self.status["status_message"] = f"Bot aktif - {self.status['symbol']}{price_text}{position_text}{signal_text}"
+                
+        except Exception as e:
+            logger.error(f"Status message update error for user {self.user_id}: {e}")
+
     async def _update_user_data(self):
-        """Kullanıcı verilerini Firebase'de güncelle - FIX: ServerValue hatası düzeltildi"""
+        """Update user data in Firebase - FIX: ServerValue hatası düzeltildi"""
         try:
             from app.main import firebase_db, firebase_initialized
             
@@ -516,8 +716,10 @@ class BotCore:
                     "total_pnl": self.status["total_pnl"],
                     "account_balance": self.status["account_balance"],
                     "current_price": self.current_price,
+                    "last_signal": self.status["last_signal"],
+                    "unrealized_pnl": self.status.get("unrealized_pnl", 0),
                     "symbol_validated": self.symbol_validated,
-                    "last_bot_update": int(time.time() * 1000)  # FIX: Manual timestamp kullan
+                    "last_bot_update": int(time.time() * 1000)  # FIX: Manual timestamp
                 }
                 
                 user_ref = firebase_db.reference(f'users/{self.user_id}')
@@ -526,28 +728,61 @@ class BotCore:
         except Exception as e:
             logger.error(f"User data update error for user {self.user_id}: {e}")
 
-    def _get_precision_from_filter(self, symbol_info, filter_type, key):
-        """Symbol precision hesaplama"""
+    async def _log_trade(self, trade_data: dict):
+        """Log trade to Firebase"""
         try:
-            for f in symbol_info['filters']:
-                if f['filterType'] == filter_type:
-                    size_str = f[key]
-                    if '.' in size_str:
-                        return len(size_str.split('.')[1].rstrip('0'))
-                    return 0
-        except:
-            pass
-        return 3 if filter_type == 'LOT_SIZE' else 2  # Default values
+            from app.main import firebase_db, firebase_initialized
+            
+            if firebase_initialized and firebase_db:
+                trade_log = {
+                    "user_id": self.user_id,
+                    "symbol": self.status["symbol"],
+                    **trade_data
+                }
+                
+                trades_ref = firebase_db.reference('trades')
+                trades_ref.push(trade_log)
+                
+                # Add to local history
+                self.trade_history.append(trade_log)
+                
+                # Maintain history limit
+                if len(self.trade_history) > 50:
+                    self.trade_history.pop(0)
+            
+        except Exception as e:
+            logger.error(f"Trade logging error for user {self.user_id}: {e}")
 
-    def _format_quantity(self, quantity: float):
-        """Quantity formatla"""
+    def _calculate_position_size(self, order_size: float, leverage: int, price: float) -> float:
+        """Calculate position size with precision"""
+        try:
+            quantity = (order_size * leverage) / price
+            return self._format_quantity(quantity)
+        except:
+            return 0.0
+
+    def _format_quantity(self, quantity: float) -> float:
+        """Format quantity with proper precision"""
         if self.quantity_precision == 0:
             return math.floor(quantity)
         factor = 10 ** self.quantity_precision
         return math.floor(quantity * factor) / factor
 
-    def get_status(self):
-        """Bot durumunu döndür"""
+    def _get_precision_from_filter(self, symbol_info: dict, filter_type: str, key: str) -> int:
+        """Get precision from symbol filters"""
+        try:
+            for f in symbol_info.get('filters', []):
+                if f.get('filterType') == filter_type:
+                    size_str = f.get(key, '0.001')
+                    if '.' in size_str:
+                        return len(size_str.split('.')[1].rstrip('0'))
+                    return 0
+        except:
+            pass
+        return 3 if filter_type == 'LOT_SIZE' else 2
+
+    def get_status(self) -> dict:
+        """Get comprehensive bot status"""
         return {
             "user_id": self.user_id,
             "is_running": self.status["is_running"],
@@ -557,11 +792,19 @@ class BotCore:
             "position_side": self.status["position_side"],
             "status_message": self.status["status_message"],
             "account_balance": self.status["account_balance"],
-            "position_pnl": self.status["position_pnl"],
+            "position_pnl": self.status.get("position_pnl", 0),
+            "unrealized_pnl": self.status.get("unrealized_pnl", 0),
             "total_trades": self.status["total_trades"],
             "total_pnl": self.status["total_pnl"],
             "last_check_time": self.status["last_check_time"],
             "current_price": self.current_price,
+            "entry_price": self.status.get("entry_price", 0),
+            "last_signal": self.status.get("last_signal", "HOLD"),
             "symbol_validated": self.symbol_validated,
-            "data_candles": len(self.klines_data)
+            "data_candles": len(self.klines_data),
+            "consecutive_losses": self.consecutive_losses,
+            "last_trade_time": self.status.get("last_trade_time"),
+            "order_size": self.status["order_size"],
+            "stop_loss": self.status["stop_loss"],
+            "take_profit": self.status["take_profit"]
         }
