@@ -1,26 +1,36 @@
+# app/bot_core.py - Optimize edilmiş versiyon
 import asyncio
 import json
-import websockets
-from .config import settings
-from .trading_strategy import trading_strategy
-from datetime import datetime, timezone
 import math
 import time
 import traceback
+from datetime import datetime, timezone
 from typing import Optional, Dict, List
+from .config import settings
+from .trading_strategy import trading_strategy
+from .binance_client import BinanceClient  # Yeni optimize edilmiş client
 from .utils.logger import get_logger
 
 logger = get_logger("bot_core")
 
 class BotCore:
-    def __init__(self, user_id: str, binance_client, bot_settings: dict):
+    def __init__(self, user_id: str, api_key: str, api_secret: str, bot_settings: dict):
         """
-        Complete Trading Bot Core - Mevcut BinanceClient ile uyumlu
+        Optimize edilmiş Trading Bot Core
+        WebSocket + Rate Limiting + Shared PriceManager
         """
         self.user_id = user_id
-        self.binance_client = binance_client  # Mevcut BinanceClient
+        self.api_key = api_key
+        self.api_secret = api_secret
         self.bot_settings = bot_settings
         self._initialized = False
+        
+        # Yeni optimize edilmiş Binance client ✅
+        self.binance_client = BinanceClient(
+            api_key=api_key,
+            api_secret=api_secret, 
+            user_id=user_id  # Rate limiting için
+        )
         
         # Bot durumu - kullanıcıya özel
         self.status = {
@@ -55,11 +65,12 @@ class BotCore:
         self.quantity_precision = 3
         self.price_precision = 2
         
-        # WebSocket ve task management
+        # Task management - WebSocket kaldırıldı ✅
         self._stop_requested = False
-        self._websocket_task = None
         self._monitor_task = None
         self._strategy_task = None
+        self._kline_task = None
+        self._price_callback_task = None
         
         # Trading controls - EMA Crossover için optimize edildi
         self.last_trade_time = 0
@@ -70,10 +81,13 @@ class BotCore:
         # Performance tracking
         self.trade_history = []
         
-        logger.info(f"BotCore created for user {user_id} with symbol {self.status['symbol']}")
+        # Price callback tracking
+        self._last_price_update = 0
+        
+        logger.info(f"Optimized BotCore created for user {user_id} with symbol {self.status['symbol']}")
 
     async def start(self):
-        """Bot başlatma - mevcut BinanceClient ile uyumlu"""
+        """Bot başlatma - optimize edilmiş versiyon"""
         if self.status["is_running"]:
             logger.warning(f"Bot already running for user {self.user_id}")
             return
@@ -82,30 +96,33 @@ class BotCore:
         self.status["is_running"] = True
         self.status["status_message"] = "Bot başlatılıyor..."
         
-        logger.info(f"Starting bot for user {self.user_id} on {self.status['symbol']}")
+        logger.info(f"Starting optimized bot for user {self.user_id} on {self.status['symbol']}")
         
         try:
-            # 1. Binance client initialization
+            # 1. Binance client initialization ✅
             await self._initialize_binance_client()
             
-            # 2. Symbol validation
+            # 2. Subscribe to WebSocket price feed ✅
+            await self._subscribe_to_price_feed()
+            
+            # 3. Symbol validation
             await self._setup_symbol_info()
             
-            # 3. Account validation
+            # 4. Account validation
             await self._validate_account()
             
-            # 4. Cleanup existing orders
+            # 5. Cleanup existing orders
             await self._cleanup_existing_orders()
             
-            # 5. Load historical data
+            # 6. Load historical data ✅
             await self._load_historical_data()
             
-            # 6. Start real-time components
-            await self._start_realtime_components()
+            # 7. Start optimized components ✅
+            await self._start_optimized_components()
             
-            self.status["status_message"] = f"Bot aktif - {self.status['symbol']} (WebSocket + Trading)"
+            self.status["status_message"] = f"✅ EMA Bot aktif - {self.status['symbol']} (Optimize WebSocket)"
             self._initialized = True
-            logger.info(f"Bot started successfully for user {self.user_id} with WebSocket data stream")
+            logger.info(f"✅ Optimized bot started successfully for user {self.user_id}")
             
         except Exception as e:
             error_msg = f"Bot başlatma hatası: {e}"
@@ -116,18 +133,27 @@ class BotCore:
             await self.stop()
 
     async def _initialize_binance_client(self):
-        """BinanceClient başlatma"""
+        """Yeni BinanceClient başlatma ✅"""
         try:
-            if not self._initialized:
-                init_result = await self.binance_client.initialize()
-                if not init_result:
-                    raise Exception("BinanceClient initialization failed")
-            logger.info(f"Binance client initialized for user {self.user_id}")
+            init_result = await self.binance_client.initialize()
+            if not init_result:
+                raise Exception("Optimized BinanceClient initialization failed")
+            logger.info(f"✅ Optimized Binance client initialized for user {self.user_id}")
         except Exception as e:
-            raise Exception(f"BinanceClient initialization failed: {e}")
+            raise Exception(f"Optimized BinanceClient initialization failed: {e}")
+
+    async def _subscribe_to_price_feed(self):
+        """WebSocket price feed'e abone ol ✅"""
+        try:
+            # Shared PriceManager kullanarak abone ol
+            await self.binance_client.subscribe_to_symbol(self.status["symbol"])
+            logger.info(f"✅ Subscribed to shared WebSocket for {self.status['symbol']} - user {self.user_id}")
+        except Exception as e:
+            logger.error(f"❌ Price feed subscription failed for user {self.user_id}: {e}")
+            raise
 
     async def _setup_symbol_info(self):
-        """Symbol bilgileri setup"""
+        """Symbol bilgileri setup - aynı kalıyor"""
         try:
             symbol_info = await self.binance_client.get_symbol_info(self.status["symbol"])
             if symbol_info:
@@ -140,15 +166,15 @@ class BotCore:
                         break
                 
                 self.symbol_validated = True
-                logger.info(f"Symbol {self.status['symbol']} configured - qty_precision: {self.quantity_precision}, price_precision: {self.price_precision}")
+                logger.info(f"Symbol {self.status['symbol']} configured for user {self.user_id} - qty_precision: {self.quantity_precision}, price_precision: {self.price_precision}")
             else:
-                logger.warning(f"Symbol info not available via REST for user {self.user_id}, using WebSocket")
+                logger.warning(f"Symbol info not available for user {self.user_id}, using defaults")
                 
         except Exception as e:
             logger.warning(f"Symbol setup failed for user {self.user_id}: {e}")
 
     async def _validate_account(self):
-        """Account validation"""
+        """Account validation - aynı kalıyor"""
         try:
             # Balance check
             self.status["account_balance"] = await self.binance_client.get_account_balance(use_cache=False)
@@ -168,7 +194,7 @@ class BotCore:
             logger.error(f"Account validation failed for user {self.user_id}: {e}")
 
     async def _cleanup_existing_orders(self):
-        """Mevcut orderları temizle"""
+        """Mevcut orderları temizle - aynı kalıyor"""
         try:
             await self.binance_client.cancel_all_orders_safe(self.status["symbol"])
             
@@ -191,7 +217,7 @@ class BotCore:
             logger.warning(f"Cleanup failed for user {self.user_id}: {e}")
 
     async def _load_historical_data(self):
-        """Historical data loading"""
+        """Historical data loading - optimize edildi ✅"""
         try:
             klines = await self.binance_client.get_historical_klines(
                 self.status["symbol"], 
@@ -202,146 +228,128 @@ class BotCore:
                 self.klines_data = klines
                 signal = trading_strategy.analyze_klines(self.klines_data)
                 self.status["last_signal"] = signal
-                logger.info(f"Historical data loaded for user {self.user_id}: {len(klines)} candles")
+                logger.info(f"✅ Historical data loaded for user {self.user_id}: {len(klines)} candles, signal: {signal}")
             else:
-                logger.warning(f"Insufficient historical data for user {self.user_id}")
+                logger.warning(f"❌ Insufficient historical data for user {self.user_id}")
                 
         except Exception as e:
-            logger.warning(f"Historical data loading failed for user {self.user_id}: {e}")
+            logger.error(f"❌ Historical data loading failed for user {self.user_id}: {e}")
 
-    async def _start_realtime_components(self):
-        """Real-time components başlat"""
-        self._websocket_task = asyncio.create_task(self._websocket_loop())
+    async def _start_optimized_components(self):
+        """Optimize edilmiş component'ları başlat ✅"""
+        # WebSocket kaldırıldı - artık shared PriceManager kullanıyor ✅
         self._monitor_task = asyncio.create_task(self._monitor_loop())
-        self._strategy_task = asyncio.create_task(self._strategy_loop())
+        self._strategy_task = asyncio.create_task(self._strategy_loop()) 
+        self._kline_task = asyncio.create_task(self._kline_data_loop())  # Yeni: Periodic kline update
+        self._price_callback_task = asyncio.create_task(self._price_update_loop())  # Yeni: Price monitoring
         
-        logger.info(f"Real-time components started for user {self.user_id}")
+        logger.info(f"✅ Optimized components started for user {self.user_id}")
 
-    async def stop(self):
-        """Bot durdurma"""
-        if not self.status["is_running"]:
-            return
-            
-        logger.info(f"Stopping bot for user {self.user_id}")
-        self._stop_requested = True
+    async def _price_update_loop(self):
+        """WebSocket'ten gelen fiyat güncellemelerini izle ✅"""
+        logger.info(f"📈 Price monitoring started for user {self.user_id}")
         
-        # Task cleanup
-        tasks = [self._websocket_task, self._monitor_task, self._strategy_task]
-        for task in tasks:
-            if task and not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-        
-        # Final cleanup
-        try:
-            await self.binance_client.cancel_all_orders_safe(self.status["symbol"])
-        except:
-            pass
-        
-        self.status.update({
-            "is_running": False,
-            "status_message": "Bot durduruldu.",
-            "last_check_time": datetime.now(timezone.utc).isoformat()
-        })
-        
-        logger.info(f"Bot stopped for user {self.user_id}")
-
-    async def _websocket_loop(self):
-        """WebSocket data stream"""
-        symbol = self.status["symbol"].lower()
-        timeframe = self.status["timeframe"]
-        
-        ticker_stream = f"{symbol}@ticker"
-        kline_stream = f"{symbol}@kline_{timeframe}"
-        ws_url = f"wss://stream.binance.com:9443/stream?streams={ticker_stream}/{kline_stream}"
-        
-        reconnect_attempts = 0
-        max_reconnects = 15
-        
-        logger.info(f"Starting combined WebSocket for user {self.user_id} on {symbol}")
-        
-        while not self._stop_requested and reconnect_attempts < max_reconnects:
+        while not self._stop_requested and self.status["is_running"]:
             try:
-                async with websockets.connect(
-                    ws_url,
-                    ping_interval=30,
-                    ping_timeout=15,
-                    close_timeout=10
-                ) as ws:
-                    logger.info(f"WebSocket connected for user {self.user_id}")
-                    reconnect_attempts = 0
+                # Shared PriceManager'dan fiyat al ✅
+                current_price = await self.binance_client.get_market_price(self.status["symbol"])
+                
+                if current_price and current_price != self.current_price:
+                    self.current_price = current_price
+                    self.status["current_price"] = current_price
+                    self._last_price_update = time.time()
                     
-                    while not self._stop_requested:
-                        try:
-                            message = await asyncio.wait_for(ws.recv(), timeout=65.0)
-                            await self._handle_websocket_message(message)
-                        except asyncio.TimeoutError:
-                            try:
-                                await ws.ping()
-                            except:
-                                logger.warning(f"WebSocket ping failed for user {self.user_id}")
-                                break
-                        except websockets.exceptions.ConnectionClosed:
-                            logger.warning(f"WebSocket closed for user {self.user_id}")
-                            break
-                        except Exception as e:
-                            logger.error(f"WebSocket message error for user {self.user_id}: {e}")
-                            await asyncio.sleep(1)
-                            
+                    # Symbol validation
+                    if not self.symbol_validated:
+                        self.symbol_validated = True
+                        logger.info(f"✅ Symbol {self.status['symbol']} validated via WebSocket for user {self.user_id}")
+                    
+                    # Real-time PnL calculation
+                    if self.status["position_side"] and self.status["entry_price"]:
+                        await self._calculate_realtime_pnl()
+                    
+                    # Log price update every 30 seconds
+                    if int(time.time()) % 30 == 0:
+                        logger.debug(f"📊 Price update for user {self.user_id}: {self.status['symbol']} = ${current_price:.2f}")
+                
+                await asyncio.sleep(2)  # Check every 2 seconds
+                
             except Exception as e:
-                if not self._stop_requested:
-                    reconnect_attempts += 1
-                    backoff_time = min(5 * reconnect_attempts, 30)
-                    logger.error(f"WebSocket error for user {self.user_id} (attempt {reconnect_attempts}): {e}")
-                    if reconnect_attempts < max_reconnects:
-                        logger.info(f"Reconnecting WebSocket for user {self.user_id} in {backoff_time}s")
-                        await asyncio.sleep(backoff_time)
+                logger.error(f"❌ Price update loop error for user {self.user_id}: {e}")
+                await asyncio.sleep(5)
 
-    async def _handle_websocket_message(self, message: str):
-        """WebSocket message handling"""
-        try:
-            data = json.loads(message)
-            
-            if 'stream' in data and 'data' in data:
-                stream = data['stream']
-                stream_data = data['data']
+    async def _kline_data_loop(self):
+        """Periodic kline data update ✅"""
+        logger.info(f"📊 Kline data loop started for user {self.user_id}")
+        
+        while not self._stop_requested and self.status["is_running"]:
+            try:
+                # Her 1 dakikada bir kline verisini güncelle (timeframe'e göre ayarlanabilir)
+                if self.status["timeframe"] == "1m":
+                    interval = 60  # 1 dakika
+                elif self.status["timeframe"] == "5m":
+                    interval = 300  # 5 dakika  
+                elif self.status["timeframe"] == "15m":
+                    interval = 900  # 15 dakika
+                else:
+                    interval = 300  # Default 5 dakika
                 
-                if '@ticker' in stream:
-                    await self._handle_ticker_data(stream_data)
-                elif '@kline' in stream:
-                    await self._handle_kline_data(stream_data)
-            else:
-                if 'e' in data:
-                    if data['e'] == '24hrTicker':
-                        await self._handle_ticker_data(data)
-                    elif data['e'] == 'kline':
-                        await self._handle_kline_data(data)
+                # Kline verisini güncelle
+                await self._update_kline_data()
+                
+                await asyncio.sleep(interval)
+                
+            except Exception as e:
+                logger.error(f"❌ Kline data loop error for user {self.user_id}: {e}")
+                await asyncio.sleep(60)
+
+    async def _update_kline_data(self):
+        """Kline verisini güncelle ✅"""
+        try:
+            # Son 2 kline'ı al (current + previous)
+            recent_klines = await self.binance_client.get_historical_klines(
+                self.status["symbol"],
+                self.status["timeframe"],
+                limit=2
+            )
+            
+            if recent_klines and len(recent_klines) >= 1:
+                latest_kline = recent_klines[-1]
+                
+                # Son kline'ı güncelle veya ekle
+                if len(self.klines_data) > 0:
+                    # Son kline'ın timestamp'ini kontrol et
+                    last_kline_time = int(self.klines_data[-1][0])
+                    new_kline_time = int(latest_kline[0])
+                    
+                    if new_kline_time > last_kline_time:
+                        # Yeni kline - ekle
+                        if len(self.klines_data) >= 100:
+                            self.klines_data.pop(0)
+                        self.klines_data.append(latest_kline)
                         
+                        close_price = float(latest_kline[4])
+                        logger.info(f"📊 New candle for user {self.user_id}: {self.status['symbol']} closed at ${close_price:.2f}")
+                        
+                        # Strategy analizi yap
+                        if len(self.klines_data) >= 25:
+                            signal = trading_strategy.analyze_klines(self.klines_data)
+                            if signal != self.status["last_signal"]:
+                                logger.info(f"🔄 EMA Strategy signal changed for user {self.user_id}: {self.status['last_signal']} -> {signal}")
+                                self.status["last_signal"] = signal
+                            
+                    elif new_kline_time == last_kline_time:
+                        # Aynı kline - güncelle (current kline)
+                        self.klines_data[-1] = latest_kline
+                else:
+                    # İlk kline
+                    self.klines_data.append(latest_kline)
+                    
         except Exception as e:
-            logger.error(f"WebSocket message parsing error for user {self.user_id}: {e}")
-
-    async def _handle_ticker_data(self, ticker_data: dict):
-        """Ticker data handling"""
-        try:
-            self.current_price = float(ticker_data['c'])
-            self.status["current_price"] = self.current_price
-            
-            if not self.symbol_validated:
-                self.symbol_validated = True
-                logger.info(f"Symbol {self.status['symbol']} validated via WebSocket for user {self.user_id}")
-            
-            # Real-time PnL calculation
-            if self.status["position_side"] and self.status["entry_price"]:
-                await self._calculate_realtime_pnl()
-                
-        except Exception as e:
-            logger.error(f"Ticker data handling error for user {self.user_id}: {e}")
+            logger.error(f"❌ Kline data update error for user {self.user_id}: {e}")
 
     async def _calculate_realtime_pnl(self):
-        """Real-time PnL calculation"""
+        """Real-time PnL calculation - aynı kalıyor"""
         try:
             if self.status["position_side"] and self.current_price and self.status["entry_price"]:
                 entry_price = self.status["entry_price"]
@@ -358,60 +366,41 @@ class BotCore:
                 self.status["unrealized_pnl"] = unrealized_pnl
                 
         except Exception as e:
-            logger.error(f"PnL calculation error for user {self.user_id}: {e}")
+            logger.error(f"❌ PnL calculation error for user {self.user_id}: {e}")
 
-    async def _handle_kline_data(self, kline_data: dict):
-        """Kline data handling"""
+    async def stop(self):
+        """Bot durdurma - optimize edildi ✅"""
+        if not self.status["is_running"]:
+            return
+            
+        logger.info(f"🛑 Stopping optimized bot for user {self.user_id}")
+        self._stop_requested = True
+        
+        # Task cleanup - optimize edildi ✅
+        tasks = [self._monitor_task, self._strategy_task, self._kline_task, self._price_callback_task]
+        for task in tasks:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        
+        # Final cleanup
         try:
-            if 'k' in kline_data:
-                kline_info = kline_data['k']
-            else:
-                kline_info = kline_data
-            
-            # Only closed candles
-            if not kline_info.get('x', False):
-                return
-            
-            close_price = float(kline_info['c'])
-            self.current_price = close_price
-            self.status["current_price"] = close_price
-            
-            logger.info(f"New candle closed for user {self.user_id}: ${close_price:.2f}")
-            
-            # Update klines data
-            new_kline = [
-                int(kline_info['t']),    # Open time
-                str(kline_info['o']),    # Open
-                str(kline_info['h']),    # High
-                str(kline_info['l']),    # Low
-                str(kline_info['c']),    # Close
-                str(kline_info['v']),    # Volume
-                int(kline_info['T']),    # Close time
-                str(kline_info['q']),    # Quote asset volume
-                int(kline_info['n']),    # Number of trades
-                str(kline_info['V']),    # Taker buy base asset volume
-                str(kline_info['Q']),    # Taker buy quote asset volume
-                '0'                      # Ignore
-            ]
-            
-            # Maintain klines buffer
-            if len(self.klines_data) >= 100:
-                self.klines_data.pop(0)
-            self.klines_data.append(new_kline)
-            
-            # Trigger strategy analysis - EMA Crossover
-            if len(self.klines_data) >= 25:  # EMA21 + buffer için daha fazla veri
-                signal = trading_strategy.analyze_klines(self.klines_data)
-                if signal != self.status["last_signal"]:
-                    logger.info(f"🔄 EMA Strategy signal changed for user {self.user_id}: {self.status['last_signal']} -> {signal}")
-                    self.status["last_signal"] = signal
-                else:
-                    logger.debug(f"EMA Strategy signal unchanged for user {self.user_id}: {signal}")
-            else:
-                logger.info(f"📊 Collecting EMA data for user {self.user_id}: {len(self.klines_data)}/25 candles")
-            
-        except Exception as e:
-            logger.error(f"Kline data handling error for user {self.user_id}: {e}")
+            await self.binance_client.cancel_all_orders_safe(self.status["symbol"])
+        except:
+            pass
+        
+        self.status.update({
+            "is_running": False,
+            "status_message": "✅ Bot durduruldu.",
+            "last_check_time": datetime.now(timezone.utc).isoformat()
+        })
+        
+        logger.info(f"✅ Optimized bot stopped for user {self.user_id}")
+
+    # WebSocket loop kaldırıldı - artık gerekli değil ✅
 
     async def _strategy_loop(self):
         """Main strategy execution loop - EMA Crossover için optimize edildi"""
@@ -425,11 +414,11 @@ class BotCore:
                 await asyncio.sleep(10)  # 10 saniye interval (EMA için)
                 
             except Exception as e:
-                logger.error(f"Strategy loop error for user {self.user_id}: {e}")
+                logger.error(f"❌ Strategy loop error for user {self.user_id}: {e}")
                 await asyncio.sleep(30)
 
     async def _execute_trading_strategy(self):
-        """EMA Crossover trading strategy execution"""
+        """EMA Crossover trading strategy execution - aynı kalıyor"""
         try:
             current_time = time.time()
             
@@ -449,7 +438,7 @@ class BotCore:
             if signal == "HOLD":
                 return
             
-            logger.info(f"📊 EMA Strategy execution for user {self.user_id}: Signal={signal}, Position={current_position}")
+            logger.debug(f"📊 EMA Strategy execution for user {self.user_id}: Signal={signal}, Position={current_position}")
             
             # No position, open new position
             if not current_position and signal in ["LONG", "SHORT"]:
@@ -469,10 +458,10 @@ class BotCore:
                 await self._check_exit_conditions()
                 
         except Exception as e:
-            logger.error(f"EMA trading strategy execution error for user {self.user_id}: {e}")
+            logger.error(f"❌ EMA trading strategy execution error for user {self.user_id}: {e}")
 
     async def _open_position(self, signal: str, entry_price: float):
-        """EMA Crossover position opening"""
+        """EMA Crossover position opening - aynı kalıyor"""
         try:
             logger.info(f"📈 Opening {signal} position for user {self.user_id} at ${entry_price:.2f} (EMA Crossover)")
             
@@ -495,7 +484,7 @@ class BotCore:
                 logger.error(f"❌ Order below minimum notional for user {self.user_id}: {notional} < {self.min_notional}")
                 return False
             
-            # Place market order using existing method
+            # Place market order using optimized client ✅
             side = "BUY" if signal == "LONG" else "SELL"
             
             try:
@@ -544,7 +533,7 @@ class BotCore:
             return False
 
     async def _flip_position(self, new_signal: str, current_price: float):
-        """EMA Crossover position flipping"""
+        """EMA Crossover position flipping - aynı kalıyor"""
         try:
             logger.info(f"🔄 EMA Crossover flipping position for user {self.user_id}: {self.status['position_side']} -> {new_signal} at ${current_price:.2f}")
             
@@ -560,12 +549,12 @@ class BotCore:
             logger.error(f"❌ EMA position flip error for user {self.user_id}: {e}")
 
     async def _close_position(self, reason: str = "SIGNAL"):
-        """Position closing using existing BinanceClient"""
+        """Position closing - aynı kalıyor"""
         try:
             if not self.status["position_side"]:
                 return False
                 
-            logger.info(f"Closing {self.status['position_side']} position for user {self.user_id} - Reason: {reason}")
+            logger.info(f"🔚 Closing {self.status['position_side']} position for user {self.user_id} - Reason: {reason}")
             
             # Get current position
             open_positions = await self.binance_client.get_open_positions(self.status["symbol"], use_cache=False)
@@ -580,7 +569,7 @@ class BotCore:
                 self.status["position_side"] = None
                 return True
             
-            # Close position using existing method
+            # Close position using optimized client ✅
             side_to_close = 'SELL' if position_amt > 0 else 'BUY'
             
             close_result = await self.binance_client.close_position(
@@ -599,7 +588,7 @@ class BotCore:
                     "entry_price": 0.0,
                     "unrealized_pnl": 0.0,
                     "total_pnl": self.status["total_pnl"] + pnl,
-                    "status_message": f"Pozisyon kapatıldı - PnL: ${pnl:.2f}"
+                    "status_message": f"✅ Pozisyon kapatıldı - PnL: ${pnl:.2f}"
                 })
                 
                 # Track consecutive losses
@@ -617,18 +606,18 @@ class BotCore:
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 })
                 
-                logger.info(f"Position closed for user {self.user_id} - PnL: ${pnl:.2f}")
+                logger.info(f"✅ Position closed for user {self.user_id} - PnL: ${pnl:.2f}")
                 return True
             else:
-                logger.error(f"Failed to close position for user {self.user_id}")
+                logger.error(f"❌ Failed to close position for user {self.user_id}")
                 return False
                 
         except Exception as e:
-            logger.error(f"Position closing error for user {self.user_id}: {e}")
+            logger.error(f"❌ Position closing error for user {self.user_id}: {e}")
             return False
 
     async def _check_exit_conditions(self):
-        """Exit conditions check"""
+        """Exit conditions check - aynı kalıyor"""
         try:
             if not self.status["position_side"] or not self.current_price or not self.status["entry_price"]:
                 return
@@ -645,24 +634,24 @@ class BotCore:
             
             # Stop loss check
             if pct_change <= -self.status["stop_loss"]:
-                logger.info(f"Stop loss triggered for user {self.user_id}: {pct_change:.2f}%")
+                logger.info(f"🛑 Stop loss triggered for user {self.user_id}: {pct_change:.2f}%")
                 await self._close_position("STOP_LOSS")
                 return
             
             # Take profit check
             if pct_change >= self.status["take_profit"]:
-                logger.info(f"Take profit triggered for user {self.user_id}: {pct_change:.2f}%")
+                logger.info(f"🎯 Take profit triggered for user {self.user_id}: {pct_change:.2f}%")
                 await self._close_position("TAKE_PROFIT")
                 return
                 
         except Exception as e:
-            logger.error(f"Exit conditions check error for user {self.user_id}: {e}")
+            logger.error(f"❌ Exit conditions check error for user {self.user_id}: {e}")
 
     async def _monitor_loop(self):
-        """Monitoring loop"""
+        """Monitoring loop - optimize edildi"""
         while not self._stop_requested and self.status["is_running"]:
             try:
-                # Update account balance
+                # Update account balance (daha az sıklıkla)
                 try:
                     self.status["account_balance"] = await self.binance_client.get_account_balance(use_cache=True)
                 except Exception as e:
@@ -689,11 +678,11 @@ class BotCore:
                 await asyncio.sleep(30)  # Monitor interval
                 
             except Exception as e:
-                logger.error(f"Monitor loop error for user {self.user_id}: {e}")
+                logger.error(f"❌ Monitor loop error for user {self.user_id}: {e}")
                 await asyncio.sleep(10)
 
     async def _update_status_message(self):
-        """Update status message - EMA Crossover için"""
+        """Update status message - optimize edildi"""
         try:
             if self.current_price and self.symbol_validated:
                 position_text = ""
@@ -707,10 +696,10 @@ class BotCore:
                 self.status["status_message"] = f"📈 EMA Bot aktif - {self.status['symbol']}{price_text}{position_text}{signal_text}"
                 
         except Exception as e:
-            logger.error(f"Status message update error for user {self.user_id}: {e}")
+            logger.error(f"❌ Status message update error for user {self.user_id}: {e}")
 
     async def _update_user_data(self):
-        """Update user data in Firebase - FIX: ServerValue hatası düzeltildi"""
+        """Update user data in Firebase - aynı kalıyor"""
         try:
             from app.main import firebase_db, firebase_initialized
             
@@ -726,17 +715,17 @@ class BotCore:
                     "last_signal": self.status["last_signal"],
                     "unrealized_pnl": self.status.get("unrealized_pnl", 0),
                     "symbol_validated": self.symbol_validated,
-                    "last_bot_update": int(time.time() * 1000)  # FIX: Manual timestamp
+                    "last_bot_update": int(time.time() * 1000)
                 }
                 
                 user_ref = firebase_db.reference(f'users/{self.user_id}')
                 user_ref.update(user_update)
             
         except Exception as e:
-            logger.error(f"User data update error for user {self.user_id}: {e}")
+            logger.error(f"❌ User data update error for user {self.user_id}: {e}")
 
     async def _log_trade(self, trade_data: dict):
-        """Log trade to Firebase"""
+        """Log trade to Firebase - aynı kalıyor"""
         try:
             from app.main import firebase_db, firebase_initialized
             
@@ -758,10 +747,10 @@ class BotCore:
                     self.trade_history.pop(0)
             
         except Exception as e:
-            logger.error(f"Trade logging error for user {self.user_id}: {e}")
+            logger.error(f"❌ Trade logging error for user {self.user_id}: {e}")
 
     def _calculate_position_size(self, order_size: float, leverage: int, price: float) -> float:
-        """Calculate position size with precision"""
+        """Calculate position size with precision - aynı kalıyor"""
         try:
             quantity = (order_size * leverage) / price
             return self._format_quantity(quantity)
@@ -769,14 +758,14 @@ class BotCore:
             return 0.0
 
     def _format_quantity(self, quantity: float) -> float:
-        """Format quantity with proper precision"""
+        """Format quantity with proper precision - aynı kalıyor"""
         if self.quantity_precision == 0:
             return math.floor(quantity)
         factor = 10 ** self.quantity_precision
         return math.floor(quantity * factor) / factor
 
     def _get_precision_from_filter(self, symbol_info: dict, filter_type: str, key: str) -> int:
-        """Get precision from symbol filters"""
+        """Get precision from symbol filters - aynı kalıyor"""
         try:
             for f in symbol_info.get('filters', []):
                 if f.get('filterType') == filter_type:
@@ -789,7 +778,7 @@ class BotCore:
         return 3 if filter_type == 'LOT_SIZE' else 2
 
     def get_status(self) -> dict:
-        """Get comprehensive bot status"""
+        """Get comprehensive bot status - aynı kalıyor"""
         return {
             "user_id": self.user_id,
             "is_running": self.status["is_running"],
@@ -813,5 +802,6 @@ class BotCore:
             "last_trade_time": self.status.get("last_trade_time"),
             "order_size": self.status["order_size"],
             "stop_loss": self.status["stop_loss"],
-            "take_profit": self.status["take_profit"]
+            "take_profit": self.status["take_profit"],
+            "last_price_update": self._last_price_update
         }
