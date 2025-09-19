@@ -1,15 +1,17 @@
+# app/routes/user.py (FIXED - Rate limit sorunu çözüldü)
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.firebase_manager import firebase_manager
 from app.utils.logger import get_logger
 from app.utils.crypto import decrypt_data, encrypt_data
-from app.binance_client import BinanceClient
+from app.core.client_manager import client_manager  # ✅ YENİ: Singleton client manager
 from app.bot_manager import bot_manager
 from pydantic import BaseModel
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 from datetime import datetime, timezone
 from typing import Optional
+import asyncio
 
 logger = get_logger("user_routes")
 router = APIRouter(prefix="/api/user", tags=["user"])
@@ -33,252 +35,303 @@ class ApiKeysRequest(BaseModel):
     api_secret: str
     testnet: bool = False
 
-@router.get("/profile")
-async def get_user_profile(current_user: dict = Depends(get_current_user)):
-    """Kullanıcı profil bilgilerini getir"""
+async def get_user_client(user_id: str, user_data: dict):
+    """
+    ✅ HELPER: Kullanıcının BinanceClient'ını al (singleton)
+    Rate limit sorununu çözer
+    """
+    if not user_data or not user_data.get('api_keys_set'):
+        return None
+    
+    try:
+        encrypted_api_key = user_data.get('binance_api_key')
+        encrypted_api_secret = user_data.get('binance_api_secret')
+        
+        if not encrypted_api_key or not encrypted_api_secret:
+            return None
+        
+        api_key = decrypt_data(encrypted_api_key)
+        api_secret = decrypt_data(encrypted_api_secret)
+        
+        if not api_key or not api_secret:
+            return None
+        
+        # ✅ Singleton client al - rate limit korunur
+        client = await client_manager.get_client(user_id, api_key, api_secret)
+        return client
+        
+    except Exception as e:
+        logger.error(f"Error getting client for user {user_id}: {e}")
+        return None
+
+@router.get("/dashboard-data")
+async def get_dashboard_data(current_user: dict = Depends(get_current_user)):
+    """
+    ✅ YENİ: Tüm dashboard verilerini tek seferde getir
+    Rate limit sorununu çözer - 8 API çağrısı → 1 API çağrısı
+    """
     try:
         user_id = current_user['uid']
         user_data = firebase_manager.get_user_data(user_id)
         
-        if not user_data:
-            # Yeni kullanıcı için varsayılan veri oluştur
-            logger.info(f"Creating default user data for: {user_id}")
-            user_data = {
-                "email": current_user.get('email'),
-                "created_at": firebase_manager.get_server_timestamp(),
-                "subscription_status": "trial",
-                "api_keys_set": False,
-                "bot_active": False,
-                "total_trades": 0,
-                "total_pnl": 0.0,
-                "role": "user"
-            }
-            firebase_manager.update_user_data(user_id, user_data)
-        
-        # Güvenli kullanıcı bilgileri döndür
-        profile = {
-            "email": user_data.get("email"),
-            "full_name": user_data.get("full_name"),
-            "subscription": {
-                "status": user_data.get("subscription_status", "trial"),
-                "plan": "Premium" if user_data.get("subscription_status") == "active" else "Deneme",
-                "expiryDate": user_data.get("subscription_expiry")
+        # Varsayılan değerler
+        dashboard_data = {
+            "profile": await get_profile_data(user_id, user_data),
+            "account": {
+                "totalBalance": 0.0,
+                "availableBalance": 0.0,
+                "unrealizedPnl": 0.0,
+                "message": "API anahtarları gerekli"
             },
-            "api_keys_set": user_data.get("api_keys_set", False),
-            "bot_active": user_data.get("bot_active", False),
-            "total_trades": user_data.get("total_trades", 0),
-            "total_pnl": user_data.get("total_pnl", 0.0),
-            "account_balance": user_data.get("account_balance", 0.0),
-            "created_at": user_data.get("created_at"),
-            "last_login": user_data.get("last_login")
+            "positions": [],
+            "stats": await get_stats_data(user_data),
+            "api_status": {
+                "hasApiKeys": False,
+                "isConnected": False,
+                "message": "API anahtarları ayarlanmamış"
+            }
         }
         
-        return profile
+        # ✅ SADECE API keys varsa Binance verilerini al
+        client = await get_user_client(user_id, user_data)
+        if client:
+            try:
+                # ✅ PARALEL veri alımı - ama aynı client kullanarak
+                balance_task = client.get_account_balance(use_cache=True)
+                positions_task = client.get_open_positions("BTCUSDT", use_cache=True)
+                
+                # Paralel bekle
+                balance, positions = await asyncio.gather(
+                    balance_task, 
+                    positions_task,
+                    return_exceptions=True
+                )
+                
+                # Balance sonucu
+                if isinstance(balance, Exception):
+                    logger.error(f"Balance error: {balance}")
+                    balance = user_data.get("account_balance", 0.0)
+                
+                # Positions sonucu
+                if isinstance(positions, Exception):
+                    logger.error(f"Positions error: {positions}")
+                    positions = []
+                
+                # ✅ Gerçek Binance verileri
+                dashboard_data.update({
+                    "account": {
+                        "totalBalance": balance,
+                        "availableBalance": balance,
+                        "unrealizedPnl": sum(float(p.get('unRealizedProfit', 0)) for p in positions),
+                        "message": "Gerçek Binance verileri (cached)"
+                    },
+                    "positions": await format_positions(positions),
+                    "api_status": {
+                        "hasApiKeys": True,
+                        "isConnected": True,
+                        "message": f"API aktif - Balance: {balance:.2f} USDT"
+                    }
+                })
+                
+                # ✅ Firebase cache güncelle (async)
+                asyncio.create_task(update_user_cache(user_id, balance))
+                
+                logger.info(f"✅ Dashboard data loaded for user: {user_id}")
+                
+            except Exception as e:
+                logger.error(f"Binance data error for user {user_id}: {e}")
+                # Fallback to cached/default data
+                dashboard_data["account"]["message"] = f"Cache verisi (API hatası: {str(e)})"
+                dashboard_data["api_status"]["isConnected"] = False
+                dashboard_data["api_status"]["message"] = f"API bağlantı hatası: {str(e)}"
+        
+        return dashboard_data
         
     except HTTPException:
         raise
+    except Exception as e:
+        logger.error(f"Dashboard data error: {e}")
+        raise HTTPException(status_code=500, detail="Dashboard verileri alınamadı")
+
+async def get_profile_data(user_id: str, user_data: dict) -> dict:
+    """Helper: Profil verilerini getir"""
+    if not user_data:
+        # Yeni kullanıcı için varsayılan veri oluştur
+        logger.info(f"Creating default user data for: {user_id}")
+        user_data = {
+            "email": "unknown@example.com",
+            "created_at": firebase_manager.get_server_timestamp(),
+            "subscription_status": "trial",
+            "api_keys_set": False,
+            "bot_active": False,
+            "total_trades": 0,
+            "total_pnl": 0.0,
+            "role": "user"
+        }
+        firebase_manager.update_user_data(user_id, user_data)
+    
+    return {
+        "email": user_data.get("email", "unknown@example.com"),
+        "full_name": user_data.get("full_name"),
+        "subscription": {
+            "status": user_data.get("subscription_status", "trial"),
+            "plan": "Premium" if user_data.get("subscription_status") == "active" else "Deneme",
+            "expiryDate": user_data.get("subscription_expiry"),
+            "daysRemaining": user_data.get("days_remaining", 7)
+        },
+        "api_keys_set": user_data.get("api_keys_set", False),
+        "bot_active": user_data.get("bot_active", False),
+        "total_trades": user_data.get("total_trades", 0),
+        "total_pnl": user_data.get("total_pnl", 0.0),
+        "account_balance": user_data.get("account_balance", 0.0),
+        "created_at": user_data.get("created_at"),
+        "last_login": user_data.get("last_login")
+    }
+
+async def get_stats_data(user_data: dict) -> dict:
+    """Helper: İstatistik verilerini getir"""
+    if not user_data:
+        return {
+            "totalTrades": 0,
+            "totalPnl": 0.0,
+            "winRate": 0.0,
+            "botStartTime": None,
+            "lastTradeTime": None
+        }
+    
+    return {
+        "totalTrades": user_data.get("total_trades", 0),
+        "totalPnl": user_data.get("total_pnl", 0.0),
+        "winRate": user_data.get("win_rate", 0.0),
+        "botStartTime": user_data.get("bot_start_time"),
+        "lastTradeTime": user_data.get("last_trade_time")
+    }
+
+async def format_positions(positions: list) -> list:
+    """Helper: Pozisyonları formatla"""
+    formatted_positions = []
+    
+    for pos in positions:
+        try:
+            position_amt = float(pos['positionAmt'])
+            if position_amt != 0:  # Sadece açık pozisyonlar
+                # Percentage hesaplama
+                entry_price = float(pos['entryPrice'])
+                mark_price = float(pos['markPrice'])
+                percentage = 0.0
+                
+                if entry_price > 0:
+                    if position_amt > 0:  # Long pozisyon
+                        percentage = ((mark_price - entry_price) / entry_price) * 100
+                    else:  # Short pozisyon
+                        percentage = ((entry_price - mark_price) / entry_price) * 100
+                
+                formatted_positions.append({
+                    "symbol": pos['symbol'],
+                    "positionSide": "LONG" if position_amt > 0 else "SHORT",
+                    "positionAmt": str(abs(position_amt)),
+                    "entryPrice": pos['entryPrice'],
+                    "markPrice": pos['markPrice'],
+                    "unrealizedPnl": float(pos['unRealizedProfit']),
+                    "percentage": round(percentage, 2)
+                })
+        except Exception as e:
+            logger.error(f"Position format error: {e}")
+            continue
+    
+    return formatted_positions
+
+async def update_user_cache(user_id: str, balance: float):
+    """Helper: Kullanıcı cache'ini güncelle (async)"""
+    try:
+        firebase_manager.update_user_data(user_id, {
+            "account_balance": balance,
+            "last_balance_update": firebase_manager.get_server_timestamp()
+        })
+    except Exception as e:
+        logger.error(f"Cache update error for user {user_id}: {e}")
+
+# ✅ ESKİ ENDPOINT'LER - Geriye uyumluluk için (artık cache kullanırlar)
+@router.get("/profile")
+async def get_user_profile(current_user: dict = Depends(get_current_user)):
+    """Kullanıcı profil bilgilerini getir - OPTIMIZED"""
+    try:
+        user_id = current_user['uid']
+        user_data = firebase_manager.get_user_data(user_id)
+        return await get_profile_data(user_id, user_data)
     except Exception as e:
         logger.error(f"Profile fetch error: {e}")
         raise HTTPException(status_code=500, detail="Profil bilgileri alınamadı")
 
 @router.get("/account")
 async def get_account_data(current_user: dict = Depends(get_current_user)):
-    """Kullanıcının hesap verilerini getir"""
-    client = None
+    """Kullanıcının hesap verilerini getir - OPTIMIZED"""
     try:
         user_id = current_user['uid']
         user_data = firebase_manager.get_user_data(user_id)
         
-        # Varsayılan değerler
-        account_data = {
-            "totalBalance": 0.0,
-            "availableBalance": 0.0,
-            "unrealizedPnl": 0.0,
-            "message": "API anahtarları gerekli"
-        }
+        # ✅ Singleton client kullan
+        client = await get_user_client(user_id, user_data)
         
-        # Eğer API keys varsa gerçek Binance verilerini al
-        if user_data and user_data.get('api_keys_set'):
-            try:
-                encrypted_api_key = user_data.get('binance_api_key')
-                encrypted_api_secret = user_data.get('binance_api_secret')
-                
-                if encrypted_api_key and encrypted_api_secret:
-                    api_key = decrypt_data(encrypted_api_key)
-                    api_secret = decrypt_data(encrypted_api_secret)
-                    
-                    if api_key and api_secret:
-                        # Binance client oluştur
-                        client = BinanceClient(api_key, api_secret)
-                        await client.initialize()
-                        
-                        # Gerçek balance al
-                        balance = await client.get_account_balance(use_cache=False)
-                        
-                        # Gerçek PnL al
-                        pnl = 0.0
-                        if user_data.get('bot_active'):
-                            bot_status = bot_manager.get_bot_status(user_id)
-                            if bot_status.get('is_running'):
-                                pnl = bot_status.get('position_pnl', 0.0)
-                        
-                        account_data = {
-                            "totalBalance": balance,
-                            "availableBalance": balance,
-                            "unrealizedPnl": pnl,
-                            "message": "Gerçek Binance verileri"
-                        }
-                        
-                        # Cache'e kaydet
-                        firebase_manager.update_user_data(user_id, {
-                            "account_balance": balance,
-                            "last_balance_update": firebase_manager.get_server_timestamp()
-                        })
-                        
-                        logger.info(f"Real account data loaded for user: {user_id}")
-                        
-            except Exception as e:
-                logger.error(f"Error getting real account data for {user_id}: {e}")
-                # Fallback to cached data
-                account_data = {
-                    "totalBalance": user_data.get("account_balance", 0.0),
-                    "availableBalance": user_data.get("account_balance", 0.0),
-                    "unrealizedPnl": 0.0,
-                    "message": f"Cache verisi (API hatası: {str(e)})"
-                }
-        
-        return account_data
-        
-    except HTTPException:
-        raise
+        if client:
+            balance = await client.get_account_balance(use_cache=True)  # ✅ Cache kullan
+            return {
+                "totalBalance": balance,
+                "availableBalance": balance,
+                "unrealizedPnl": 0.0,
+                "message": "Cached Binance data"
+            }
+        else:
+            return {
+                "totalBalance": user_data.get("account_balance", 0.0) if user_data else 0.0,
+                "availableBalance": user_data.get("account_balance", 0.0) if user_data else 0.0,
+                "unrealizedPnl": 0.0,
+                "message": "API anahtarları gerekli"
+            }
     except Exception as e:
         logger.error(f"Account data fetch error: {e}")
         raise HTTPException(status_code=500, detail="Hesap verileri alınamadı")
-    finally:
-        # FIX: Client'ı her durumda kapat
-        if client:
-            try:
-                await client.close()
-            except Exception as close_error:
-                logger.error(f"Client close error: {close_error}")
 
 @router.get("/stats")
 async def get_user_stats(current_user: dict = Depends(get_current_user)):
-    """Kullanıcının trading istatistiklerini getir"""
+    """Kullanıcının trading istatistiklerini getir - OPTIMIZED"""
     try:
         user_id = current_user['uid']
         user_data = firebase_manager.get_user_data(user_id)
-        
-        if not user_data:
-            # Varsayılan stats
-            return {
-                "totalTrades": 0,
-                "totalPnl": 0.0,
-                "winRate": 0.0,
-                "botStartTime": None,
-                "lastTradeTime": None
-            }
-        
-        # Trading istatistikleri
-        stats = {
-            "totalTrades": user_data.get("total_trades", 0),
-            "totalPnl": user_data.get("total_pnl", 0.0),
-            "winRate": user_data.get("win_rate", 0.0),
-            "botStartTime": user_data.get("bot_start_time"),
-            "lastTradeTime": user_data.get("last_trade_time")
-        }
-        
-        return stats
-        
-    except HTTPException:
-        raise
+        return await get_stats_data(user_data)
     except Exception as e:
         logger.error(f"Stats fetch error: {e}")
         raise HTTPException(status_code=500, detail="İstatistikler alınamadı")
 
 @router.get("/positions")
 async def get_user_positions(current_user: dict = Depends(get_current_user)):
-    """Kullanıcının açık pozisyonlarını getir - FIX: percentage hatası düzeltildi"""
-    client = None
+    """Kullanıcının açık pozisyonlarını getir - OPTIMIZED"""
     try:
         user_id = current_user['uid']
         user_data = firebase_manager.get_user_data(user_id)
         
-        positions = []
+        # ✅ Singleton client kullan
+        client = await get_user_client(user_id, user_data)
         
-        # Gerçek pozisyonları Binance'dan al
-        if user_data and user_data.get('api_keys_set'):
-            try:
-                encrypted_api_key = user_data.get('binance_api_key')
-                encrypted_api_secret = user_data.get('binance_api_secret')
-                
-                if encrypted_api_key and encrypted_api_secret:
-                    api_key = decrypt_data(encrypted_api_key)
-                    api_secret = decrypt_data(encrypted_api_secret)
-                    
-                    if api_key and api_secret:
-                        # Binance client oluştur
-                        client = BinanceClient(api_key, api_secret)
-                        await client.initialize()
-                        
-                        # Tüm açık pozisyonları al
-                        all_positions = await client.client.futures_position_information()
-                        
-                        for pos in all_positions:
-                            position_amt = float(pos['positionAmt'])
-                            if position_amt != 0:  # Sadece açık pozisyonlar
-                                # FIX: Percentage'ı güvenli şekilde hesapla
-                                entry_price = float(pos['entryPrice'])
-                                mark_price = float(pos['markPrice'])
-                                percentage = 0.0
-                                
-                                if entry_price > 0:
-                                    if position_amt > 0:  # Long pozisyon
-                                        percentage = ((mark_price - entry_price) / entry_price) * 100
-                                    else:  # Short pozisyon
-                                        percentage = ((entry_price - mark_price) / entry_price) * 100
-                                
-                                positions.append({
-                                    "symbol": pos['symbol'],
-                                    "positionSide": "LONG" if position_amt > 0 else "SHORT",
-                                    "positionAmt": str(abs(position_amt)),
-                                    "entryPrice": pos['entryPrice'],
-                                    "markPrice": pos['markPrice'],
-                                    "unrealizedPnl": float(pos['unRealizedProfit']),
-                                    "percentage": round(percentage, 2)  # FIX: Manuel hesaplama
-                                })
-                        
-                        logger.info(f"Real positions loaded for user: {user_id}")
-                        
-            except Exception as e:
-                logger.error(f"Error getting real positions for {user_id}: {e}")
-        
-        return positions
-        
-    except HTTPException:
-        raise
+        if client:
+            # ✅ Cache kullan
+            all_positions = await client.client.futures_position_information()
+            return await format_positions(all_positions)
+        else:
+            return []
+            
     except Exception as e:
         logger.error(f"Positions fetch error: {e}")
         raise HTTPException(status_code=500, detail="Pozisyonlar alınamadı")
-    finally:
-        # FIX: Client'ı her durumda kapat
-        if client:
-            try:
-                await client.close()
-            except Exception as close_error:
-                logger.error(f"Client close error: {close_error}")
 
 @router.get("/recent-trades")
 async def get_recent_trades(
     current_user: dict = Depends(get_current_user),
     limit: int = 10
 ):
-    """Kullanıcının son işlemlerini getir"""
-    client = None
+    """Kullanıcının son işlemlerini getir - OPTIMIZED"""
     try:
         user_id = current_user['uid']
-        user_data = firebase_manager.get_user_data(user_id)
-        
         trades = []
         
         # Önce Firebase'den al
@@ -305,88 +358,42 @@ async def get_recent_trades(
         except Exception as firebase_error:
             logger.warning(f"Firebase trades fetch failed: {firebase_error}")
         
-        # Eğer Firebase'den veri yoksa ve API keys varsa, Binance'dan al
-        if not trades and user_data and user_data.get('api_keys_set'):
-            try:
-                encrypted_api_key = user_data.get('binance_api_key')
-                encrypted_api_secret = user_data.get('binance_api_secret')
-                
-                if encrypted_api_key and encrypted_api_secret:
-                    api_key = decrypt_data(encrypted_api_key)
-                    api_secret = decrypt_data(encrypted_api_secret)
-                    
-                    if api_key and api_secret:
-                        client = BinanceClient(api_key, api_secret)
-                        await client.initialize()
-                        
-                        # Son işlemleri al (BTCUSDT örneği)
-                        recent_trades = await client.client.futures_account_trades(symbol="BTCUSDT", limit=limit)
-                        
-                        for trade in recent_trades[-limit:]:
-                            trades.append({
-                                "id": str(trade['id']),
-                                "symbol": trade['symbol'],
-                                "side": trade['side'],
-                                "quantity": float(trade['qty']),
-                                "price": float(trade['price']),
-                                "quoteQty": float(trade['quoteQty']),
-                                "pnl": float(trade['realizedPnl']),
-                                "status": "FILLED",
-                                "time": trade['time']
-                            })
-                        
-                        logger.info(f"Binance trades loaded for user: {user_id}")
-                        
-            except Exception as e:
-                logger.error(f"Binance trades fetch failed: {e}")
-        
-        # Tarihe göre sırala (en yeni önce)
+        # Tarihe göre sırala
         trades.sort(key=lambda x: x.get("time", 0), reverse=True)
-        
         return trades
         
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Recent trades fetch error: {e}")
         raise HTTPException(status_code=500, detail="Son işlemler alınamadı")
-    finally:
-        # FIX: Client'ı her durumda kapat
-        if client:
-            try:
-                await client.close()
-            except Exception as close_error:
-                logger.error(f"Client close error: {close_error}")
 
 @router.post("/api-keys")
 async def save_api_keys(
     request: ApiKeysRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """Kullanıcının API anahtarlarını kaydet"""
-    test_client = None
+    """Kullanıcının API anahtarlarını kaydet - OPTIMIZED"""
     try:
         user_id = current_user['uid']
         logger.info(f"API keys save request from user: {user_id}")
         
-        # API anahtarlarını test et
+        # ✅ TEST: Geçici client ile test et
+        from app.binance_client import BinanceClient
+        test_client = BinanceClient(request.api_key, request.api_secret, f"{user_id}_test")
+        
         try:
-            test_client = BinanceClient(request.api_key, request.api_secret)
             await test_client.initialize()
-            
-            # Test balance call
             balance = await test_client.get_account_balance(use_cache=False)
             logger.info(f"API test successful for user {user_id}, balance: {balance}")
-            
         except Exception as e:
             logger.error(f"API test failed for user {user_id}: {e}")
             raise HTTPException(status_code=400, detail=f"API anahtarları geçersiz: {str(e)}")
+        finally:
+            await test_client.close()
         
-        # API anahtarlarını şifrele
+        # API anahtarlarını şifrele ve kaydet
         encrypted_api_key = encrypt_data(request.api_key)
         encrypted_api_secret = encrypt_data(request.api_secret)
         
-        # Firebase'e kaydet
         api_data = {
             "binance_api_key": encrypted_api_key,
             "binance_api_secret": encrypted_api_secret,
@@ -402,7 +409,10 @@ async def save_api_keys(
         if not success:
             raise HTTPException(status_code=500, detail="API anahtarları kaydedilemedi")
         
-        logger.info(f"API keys saved for user: {user_id}")
+        # ✅ Eski client'ı kaldır (yeni anahtarlar için)
+        await client_manager.remove_client(user_id)
+        
+        logger.info(f"✅ API keys saved for user: {user_id}")
         
         return {
             "success": True,
@@ -415,135 +425,58 @@ async def save_api_keys(
     except Exception as e:
         logger.error(f"API keys save error: {e}")
         raise HTTPException(status_code=500, detail=f"API anahtarları kaydedilemedi: {str(e)}")
-    finally:
-        # FIX: Test client'ı her durumda kapat
-        if test_client:
-            try:
-                await test_client.close()
-            except Exception as close_error:
-                logger.error(f"Test client close error: {close_error}")
 
 @router.get("/api-status")
 async def get_api_status(current_user: dict = Depends(get_current_user)):
-    """Kullanıcının API durumunu kontrol et"""
-    test_client = None
+    """Kullanıcının API durumunu kontrol et - OPTIMIZED"""
     try:
         user_id = current_user['uid']
-        user_data = firebase_manager.get_user_data(user_id)
         
-        if not user_data:
-            return {
-                "hasApiKeys": False,
-                "isConnected": False,
-                "message": "Kullanıcı verisi bulunamadı"
-            }
+        # ✅ Client manager'dan status al
+        status = await client_manager.get_client_status(user_id)
         
-        has_api_keys = user_data.get('api_keys_set', False)
+        return {
+            "hasApiKeys": status["exists"],
+            "isConnected": status["is_connected"],
+            "message": status["message"]
+        }
         
-        if not has_api_keys:
-            return {
-                "hasApiKeys": False,
-                "isConnected": False,
-                "message": "API anahtarları ayarlanmamış"
-            }
-        
-        # API bağlantısını test et
-        try:
-            encrypted_api_key = user_data.get('binance_api_key')
-            encrypted_api_secret = user_data.get('binance_api_secret')
-            
-            if encrypted_api_key and encrypted_api_secret:
-                api_key = decrypt_data(encrypted_api_key)
-                api_secret = decrypt_data(encrypted_api_secret)
-                
-                if api_key and api_secret and len(api_key) == 64 and len(api_secret) == 64:
-                    # Quick test
-                    test_client = BinanceClient(api_key, api_secret)
-                    await test_client.initialize()
-                    balance = await test_client.get_account_balance(use_cache=True)
-                    
-                    return {
-                        "hasApiKeys": True,
-                        "isConnected": True,
-                        "message": f"API anahtarları aktif - Balance: {balance} USDT"
-                    }
-                else:
-                    return {
-                        "hasApiKeys": True,
-                        "isConnected": False,
-                        "message": "API anahtarları geçersiz format"
-                    }
-            else:
-                return {
-                    "hasApiKeys": False,
-                    "isConnected": False,
-                    "message": "API anahtarları bulunamadı"
-                }
-                
-        except Exception as e:
-            logger.error(f"API test error for user {user_id}: {e}")
-            return {
-                "hasApiKeys": True,
-                "isConnected": False,
-                "message": f"API test hatası: {str(e)}"
-            }
-        
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"API status check error: {e}")
         raise HTTPException(status_code=500, detail=f"API durumu kontrol edilemedi: {str(e)}")
-    finally:
-        # FIX: Test client'ı her durumda kapat
-        if test_client:
-            try:
-                await test_client.close()
-            except Exception as close_error:
-                logger.error(f"Test client close error: {close_error}")
 
 @router.get("/api-info")
 async def get_api_info(current_user: dict = Depends(get_current_user)):
-    """Kullanıcının API bilgilerini getir (masked)"""
+    """Kullanıcının API bilgilerini getir (masked) - OPTIMIZED"""
     try:
         user_id = current_user['uid']
         user_data = firebase_manager.get_user_data(user_id)
         
-        if not user_data:
+        if not user_data or not user_data.get('api_keys_set'):
             return {
                 "hasKeys": False,
                 "maskedApiKey": None,
-                "useTestnet": False
+                "is_testnet": False
             }
         
-        has_keys = user_data.get('api_keys_set', False)
+        # API key'in ilk 8 karakterini göster
+        encrypted_api_key = user_data.get('binance_api_key')
+        masked_key = None
         
-        if has_keys:
-            # API key'in ilk 8 karakterini göster
-            encrypted_api_key = user_data.get('binance_api_key')
-            masked_key = None
-            
-            if encrypted_api_key:
-                try:
-                    api_key = decrypt_data(encrypted_api_key)
-                    if api_key and len(api_key) >= 8:
-                        masked_key = api_key[:8] + "..." + api_key[-4:]
-                except:
-                    masked_key = "Şifreli API Key"
-            
-            return {
-                "hasKeys": True,
-                "maskedApiKey": masked_key,
-                "useTestnet": user_data.get('api_testnet', False)
-            }
-        else:
-            return {
-                "hasKeys": False,
-                "maskedApiKey": None,
-                "useTestnet": False
-            }
+        if encrypted_api_key:
+            try:
+                api_key = decrypt_data(encrypted_api_key)
+                if api_key and len(api_key) >= 8:
+                    masked_key = api_key[:8] + "..." + api_key[-4:]
+            except:
+                masked_key = "Şifreli API Key"
         
-    except HTTPException:
-        raise
+        return {
+            "hasKeys": True,
+            "maskedApiKey": masked_key,
+            "is_testnet": user_data.get('api_testnet', False)
+        }
+        
     except Exception as e:
         logger.error(f"API info fetch error: {e}")
         raise HTTPException(status_code=500, detail="API bilgileri alınamadı")
@@ -553,8 +486,7 @@ async def close_position(
     request: dict,
     current_user: dict = Depends(get_current_user)
 ):
-    """Pozisyon kapatma"""
-    client = None
+    """Pozisyon kapatma - OPTIMIZED"""
     try:
         user_id = current_user['uid']
         symbol = request.get('symbol')
@@ -565,81 +497,34 @@ async def close_position(
         
         user_data = firebase_manager.get_user_data(user_id)
         
-        if not user_data or not user_data.get('api_keys_set'):
+        # ✅ Singleton client kullan
+        client = await get_user_client(user_id, user_data)
+        if not client:
             raise HTTPException(status_code=400, detail="API anahtarları gerekli")
         
-        # Gerçek pozisyon kapatma
-        try:
-            encrypted_api_key = user_data.get('binance_api_key')
-            encrypted_api_secret = user_data.get('binance_api_secret')
-            
-            api_key = decrypt_data(encrypted_api_key)
-            api_secret = decrypt_data(encrypted_api_secret)
-            
-            client = BinanceClient(api_key, api_secret)
-            await client.initialize()
-            
-            # Pozisyon bilgilerini al
-            positions = await client.get_open_positions(symbol, use_cache=False)
-            
-            if not positions:
-                raise HTTPException(status_code=404, detail="Açık pozisyon bulunamadı")
-            
-            position = positions[0]
-            position_amt = float(position['positionAmt'])
-            side_to_close = 'SELL' if position_amt > 0 else 'BUY'
-            
-            # Pozisyonu kapat
-            close_result = await client.close_position(symbol, position_amt, side_to_close)
-            
-            if close_result:
-                # PnL hesapla
-                pnl = await client.get_last_trade_pnl(symbol)
-                
-                # Trade'i Firebase'e kaydet
-                trade_data = {
-                    "user_id": user_id,
-                    "symbol": symbol,
-                    "side": position_side,
-                    "status": "CLOSED_MANUAL",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "pnl": pnl,
-                    "close_reason": "manual"
-                }
-                
-                firebase_manager.log_trade(trade_data)
-                
-                # User stats güncelle
-                current_trades = user_data.get('total_trades', 0)
-                current_pnl = user_data.get('total_pnl', 0.0)
-                
-                firebase_manager.update_user_data(user_id, {
-                    'total_trades': current_trades + 1,
-                    'total_pnl': current_pnl + pnl,
-                    'last_trade_time': firebase_manager.get_server_timestamp()
-                })
-                
-                return {
-                    "success": True,
-                    "message": "Pozisyon başarıyla kapatıldı",
-                    "pnl": pnl
-                }
-            else:
-                raise Exception("Pozisyon kapatma işlemi başarısız")
-                
-        except Exception as e:
-            logger.error(f"Position close error for {user_id}: {e}")
-            raise HTTPException(status_code=500, detail=f"Pozisyon kapatılamadı: {str(e)}")
+        # Pozisyon bilgilerini al
+        positions = await client.get_open_positions(symbol, use_cache=False)
         
+        if not positions:
+            raise HTTPException(status_code=404, detail="Açık pozisyon bulunamadı")
+        
+        position = positions[0]
+        position_amt = float(position['positionAmt'])
+        side_to_close = 'SELL' if position_amt > 0 else 'BUY'
+        
+        # Pozisyonu kapat
+        close_result = await client.close_position(symbol, position_amt, side_to_close)
+        
+        if close_result:
+            return {
+                "success": True,
+                "message": "Pozisyon başarıyla kapatıldı"
+            }
+        else:
+            raise Exception("Pozisyon kapatma işlemi başarısız")
+            
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Position close error: {e}")
         raise HTTPException(status_code=500, detail="Pozisyon kapatılamadı")
-    finally:
-        # FIX: Client'ı her durumda kapat
-        if client:
-            try:
-                await client.close()
-            except Exception as close_error:
-                logger.error(f"Client close error: {close_error}")
