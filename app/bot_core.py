@@ -1,4 +1,4 @@
-# app/bot_core.py - Optimize edilmiş versiyon
+# app/bot_core.py - Complete Optimized Version with Profitable Strategy
 import asyncio
 import json
 import math
@@ -7,8 +7,8 @@ import traceback
 from datetime import datetime, timezone
 from typing import Optional, Dict, List
 from .config import settings
-from .trading_strategy import trading_strategy
-from .binance_client import BinanceClient  # Yeni optimize edilmiş client
+from .trading_strategy import create_strategy_for_timeframe  # ✅ Updated import
+from .binance_client import BinanceClient  # ✅ Optimized client
 from .utils.logger import get_logger
 
 logger = get_logger("bot_core")
@@ -16,8 +16,8 @@ logger = get_logger("bot_core")
 class BotCore:
     def __init__(self, user_id: str, api_key: str, api_secret: str, bot_settings: dict):
         """
-        Optimize edilmiş Trading Bot Core
-        WebSocket + Rate Limiting + Shared PriceManager
+        💰 Profitable Trading Bot Core
+        Optimize WebSocket + Rate Limiting + Timeframe Strategy
         """
         self.user_id = user_id
         self.api_key = api_key
@@ -25,22 +25,35 @@ class BotCore:
         self.bot_settings = bot_settings
         self._initialized = False
         
-        # Yeni optimize edilmiş Binance client ✅
+        # ✅ Optimized Binance client
         self.binance_client = BinanceClient(
             api_key=api_key,
             api_secret=api_secret, 
             user_id=user_id  # Rate limiting için
         )
         
+        # ✅ UPDATED: Timeframe-based profitable strategy
+        timeframe = bot_settings.get("timeframe", "15m")
+        self.timeframe_strategy = create_strategy_for_timeframe(timeframe)
+        
+        # ✅ Dynamic risk parameters from strategy
+        risk_params = self.timeframe_strategy.get_risk_params()
+        
         # Bot durumu - kullanıcıya özel
         self.status = {
             "is_running": False,
             "symbol": bot_settings.get("symbol", "BTCUSDT"),
-            "timeframe": bot_settings.get("timeframe", "15m"),
+            "timeframe": timeframe,
             "leverage": bot_settings.get("leverage", 10),
             "order_size": bot_settings.get("order_size", 35.0),
-            "stop_loss": bot_settings.get("stop_loss", 2.0),
-            "take_profit": bot_settings.get("take_profit", 4.0),
+            
+            # ✅ Strategy'den gelen dinamik değerler
+            "stop_loss": bot_settings.get("stop_loss", risk_params["stop_loss_percent"]),
+            "take_profit": bot_settings.get("take_profit", risk_params["take_profit_percent"]),
+            "max_hold_time": risk_params["max_hold_time_minutes"],
+            "expected_win_rate": risk_params["win_rate_target"],
+            "strategy_type": self.timeframe_strategy.config["strategy_type"],
+            
             "position_side": None,
             "status_message": "Bot başlatılmadı.",
             "account_balance": 0.0,
@@ -52,7 +65,14 @@ class BotCore:
             "last_signal": "HOLD",
             "entry_price": 0.0,
             "current_price": 0.0,
-            "unrealized_pnl": 0.0
+            "unrealized_pnl": 0.0,
+            
+            # ✅ Strategy performance tracking
+            "current_win_rate": 0.0,
+            "performance_vs_expected": 1.0,
+            "total_closed_trades": 0,
+            "average_pnl_per_trade": 0.0,
+            "strategy_performance": "TRACKING"
         }
         
         # Trading data
@@ -65,26 +85,29 @@ class BotCore:
         self.quantity_precision = 3
         self.price_precision = 2
         
-        # Task management - WebSocket kaldırıldı ✅
+        # Task management - ✅ Optimized (no individual WebSocket)
         self._stop_requested = False
         self._monitor_task = None
         self._strategy_task = None
         self._kline_task = None
         self._price_callback_task = None
         
-        # Trading controls - EMA Crossover için optimize edildi
+        # Trading controls
         self.last_trade_time = 0
-        self.min_trade_interval = 30  # 30 saniye (EMA crossover için)
+        self.min_trade_interval = 30  # 30 saniye
         self.consecutive_losses = 0
         self.max_consecutive_losses = 3
         
         # Performance tracking
         self.trade_history = []
+        self.signal_history = []  # ✅ Signal tracking
         
         # Price callback tracking
         self._last_price_update = 0
         
-        logger.info(f"Optimized BotCore created for user {user_id} with symbol {self.status['symbol']}")
+        # Strategy info log
+        strategy_info = self.timeframe_strategy.get_strategy_info()
+        logger.info(f"💰 {timeframe} Profitable strategy loaded for user {user_id}: {strategy_info}")
 
     async def start(self):
         """Bot başlatma - optimize edilmiş versiyon"""
@@ -96,7 +119,7 @@ class BotCore:
         self.status["is_running"] = True
         self.status["status_message"] = "Bot başlatılıyor..."
         
-        logger.info(f"Starting optimized bot for user {self.user_id} on {self.status['symbol']}")
+        logger.info(f"🚀 Starting profitable {self.status['timeframe']} bot for user {self.user_id} on {self.status['symbol']}")
         
         try:
             # 1. Binance client initialization ✅
@@ -120,20 +143,20 @@ class BotCore:
             # 7. Start optimized components ✅
             await self._start_optimized_components()
             
-            self.status["status_message"] = f"✅ EMA Bot aktif - {self.status['symbol']} (Optimize WebSocket)"
+            self.status["status_message"] = f"✅ {self.status['strategy_type'].title()} Bot aktif - {self.status['symbol']} ({self.status['timeframe']})"
             self._initialized = True
-            logger.info(f"✅ Optimized bot started successfully for user {self.user_id}")
+            logger.info(f"✅ Profitable {self.status['timeframe']} bot started for user {self.user_id}")
             
         except Exception as e:
             error_msg = f"Bot başlatma hatası: {e}"
-            logger.error(f"Bot start failed for user {self.user_id}: {e}")
+            logger.error(f"❌ Bot start failed for user {self.user_id}: {e}")
             logger.error(traceback.format_exc())
             self.status["status_message"] = error_msg
             self.status["is_running"] = False
             await self.stop()
 
     async def _initialize_binance_client(self):
-        """Yeni BinanceClient başlatma ✅"""
+        """Optimized BinanceClient başlatma ✅"""
         try:
             init_result = await self.binance_client.initialize()
             if not init_result:
@@ -153,7 +176,7 @@ class BotCore:
             raise
 
     async def _setup_symbol_info(self):
-        """Symbol bilgileri setup - aynı kalıyor"""
+        """Symbol bilgileri setup"""
         try:
             symbol_info = await self.binance_client.get_symbol_info(self.status["symbol"])
             if symbol_info:
@@ -174,7 +197,7 @@ class BotCore:
             logger.warning(f"Symbol setup failed for user {self.user_id}: {e}")
 
     async def _validate_account(self):
-        """Account validation - aynı kalıyor"""
+        """Account validation"""
         try:
             # Balance check
             self.status["account_balance"] = await self.binance_client.get_account_balance(use_cache=False)
@@ -194,7 +217,7 @@ class BotCore:
             logger.error(f"Account validation failed for user {self.user_id}: {e}")
 
     async def _cleanup_existing_orders(self):
-        """Mevcut orderları temizle - aynı kalıyor"""
+        """Mevcut orderları temizle"""
         try:
             await self.binance_client.cancel_all_orders_safe(self.status["symbol"])
             
@@ -217,18 +240,24 @@ class BotCore:
             logger.warning(f"Cleanup failed for user {self.user_id}: {e}")
 
     async def _load_historical_data(self):
-        """Historical data loading - optimize edildi ✅"""
+        """Historical data loading - ✅ Strategy optimized"""
         try:
+            # Strategy'nin gerekli kline sayısına göre ayarla
+            required_klines = max(self.timeframe_strategy.config["ema_slow"] + 20, 50)
+            
             klines = await self.binance_client.get_historical_klines(
                 self.status["symbol"], 
                 self.status["timeframe"], 
-                limit=50
+                limit=required_klines
             )
             if klines and len(klines) > 20:
                 self.klines_data = klines
-                signal = trading_strategy.analyze_klines(self.klines_data)
+                
+                # ✅ Timeframe strategy ile ilk analiz
+                signal = self.timeframe_strategy.analyze_klines(self.klines_data)
                 self.status["last_signal"] = signal
-                logger.info(f"✅ Historical data loaded for user {self.user_id}: {len(klines)} candles, signal: {signal}")
+                
+                logger.info(f"✅ Historical data loaded for user {self.user_id}: {len(klines)} candles, initial signal: {signal}")
             else:
                 logger.warning(f"❌ Insufficient historical data for user {self.user_id}")
                 
@@ -240,8 +269,8 @@ class BotCore:
         # WebSocket kaldırıldı - artık shared PriceManager kullanıyor ✅
         self._monitor_task = asyncio.create_task(self._monitor_loop())
         self._strategy_task = asyncio.create_task(self._strategy_loop()) 
-        self._kline_task = asyncio.create_task(self._kline_data_loop())  # Yeni: Periodic kline update
-        self._price_callback_task = asyncio.create_task(self._price_update_loop())  # Yeni: Price monitoring
+        self._kline_task = asyncio.create_task(self._kline_data_loop())
+        self._price_callback_task = asyncio.create_task(self._price_update_loop())
         
         logger.info(f"✅ Optimized components started for user {self.user_id}")
 
@@ -280,19 +309,20 @@ class BotCore:
 
     async def _kline_data_loop(self):
         """Periodic kline data update ✅"""
-        logger.info(f"📊 Kline data loop started for user {self.user_id}")
+        logger.info(f"📊 {self.status['timeframe']} kline data loop started for user {self.user_id}")
         
         while not self._stop_requested and self.status["is_running"]:
             try:
-                # Her 1 dakikada bir kline verisini güncelle (timeframe'e göre ayarlanabilir)
-                if self.status["timeframe"] == "1m":
-                    interval = 60  # 1 dakika
-                elif self.status["timeframe"] == "5m":
-                    interval = 300  # 5 dakika  
-                elif self.status["timeframe"] == "15m":
-                    interval = 900  # 15 dakika
-                else:
-                    interval = 300  # Default 5 dakika
+                # Timeframe'e göre interval ayarla
+                timeframe_intervals = {
+                    "5m": 300,    # 5 dakika
+                    "15m": 900,   # 15 dakika  
+                    "30m": 1800,  # 30 dakika
+                    "1h": 3600,   # 1 saat
+                    "4h": 14400   # 4 saat
+                }
+                
+                interval = timeframe_intervals.get(self.status["timeframe"], 900)  # Default 15m
                 
                 # Kline verisini güncelle
                 await self._update_kline_data()
@@ -304,7 +334,7 @@ class BotCore:
                 await asyncio.sleep(60)
 
     async def _update_kline_data(self):
-        """Kline verisini güncelle ✅"""
+        """Kline verisini güncelle - ✅ Strategy integration"""
         try:
             # Son 2 kline'ı al (current + previous)
             recent_klines = await self.binance_client.get_historical_klines(
@@ -329,14 +359,21 @@ class BotCore:
                         self.klines_data.append(latest_kline)
                         
                         close_price = float(latest_kline[4])
-                        logger.info(f"📊 New candle for user {self.user_id}: {self.status['symbol']} closed at ${close_price:.2f}")
+                        logger.info(f"📊 New {self.status['timeframe']} candle for user {self.user_id}: ${close_price:.2f}")
                         
-                        # Strategy analizi yap
-                        if len(self.klines_data) >= 25:
-                            signal = trading_strategy.analyze_klines(self.klines_data)
+                        # ✅ UPDATED: Timeframe-optimized strategy analysis
+                        required_candles = max(self.timeframe_strategy.config["ema_slow"] + 10, 25)
+                        if len(self.klines_data) >= required_candles:
+                            signal = self.timeframe_strategy.analyze_klines(self.klines_data)
+                            
                             if signal != self.status["last_signal"]:
-                                logger.info(f"🔄 EMA Strategy signal changed for user {self.user_id}: {self.status['last_signal']} -> {signal}")
+                                logger.info(f"💰 {self.status['timeframe']} {self.status['strategy_type']} signal for user {self.user_id}: {self.status['last_signal']} -> {signal}")
                                 self.status["last_signal"] = signal
+                                
+                                # ✅ Strategy performance tracking
+                                await self._track_strategy_performance(signal)
+                        else:
+                            logger.info(f"📊 Collecting {self.status['timeframe']} data for user {self.user_id}: {len(self.klines_data)}/{required_candles} candles")
                             
                     elif new_kline_time == last_kline_time:
                         # Aynı kline - güncelle (current kline)
@@ -348,8 +385,82 @@ class BotCore:
         except Exception as e:
             logger.error(f"❌ Kline data update error for user {self.user_id}: {e}")
 
+    async def _track_strategy_performance(self, signal: str):
+        """✅ Strategy performans takibi"""
+        try:
+            # Signal history tracking
+            self.signal_history.append({
+                "signal": signal,
+                "price": self.current_price,
+                "timestamp": time.time(),
+                "timeframe": self.status["timeframe"],
+                "strategy_type": self.status["strategy_type"]
+            })
+            
+            # Keep last 50 signals
+            if len(self.signal_history) > 50:
+                self.signal_history.pop(0)
+                
+            # Performance metrics calculation
+            if len(self.trade_history) > 3:
+                await self._calculate_strategy_metrics()
+                
+        except Exception as e:
+            logger.error(f"❌ Strategy performance tracking error: {e}")
+
+    async def _calculate_strategy_metrics(self):
+        """📊 Strategy metrics hesaplama"""
+        try:
+            # Sadece closed trade'leri hesapla
+            closed_trades = [trade for trade in self.trade_history if trade.get("action") == "CLOSE"]
+            if len(closed_trades) < 3:
+                return
+                
+            # Win rate calculation
+            winning_trades = sum(1 for trade in closed_trades if trade.get("pnl", 0) > 0)
+            total_trades = len(closed_trades)
+            
+            current_win_rate = (winning_trades / total_trades) * 100
+            expected_win_rate = self.status["expected_win_rate"]
+            
+            # Performance vs expectation
+            performance_ratio = current_win_rate / expected_win_rate if expected_win_rate > 0 else 1.0
+            
+            # Average PnL calculation
+            total_pnl = sum(trade.get("pnl", 0) for trade in closed_trades)
+            avg_pnl = total_pnl / total_trades if total_trades > 0 else 0
+            
+            # Consecutive wins/losses
+            recent_trades = closed_trades[-10:] if len(closed_trades) > 10 else closed_trades
+            consecutive_wins = 0
+            for trade in reversed(recent_trades):
+                if trade.get("pnl", 0) > 0:
+                    consecutive_wins += 1
+                else:
+                    break
+            
+            self.status.update({
+                "current_win_rate": round(current_win_rate, 1),
+                "performance_vs_expected": round(performance_ratio, 2),
+                "total_closed_trades": total_trades,
+                "average_pnl_per_trade": round(avg_pnl, 2),
+                "consecutive_wins": consecutive_wins,
+                "strategy_performance": "ABOVE_TARGET" if performance_ratio > 1.0 else "BELOW_TARGET"
+            })
+            
+            # Log performance every 5 trades
+            if total_trades % 5 == 0:
+                logger.info(f"📊 {self.status['timeframe']} {self.status['strategy_type']} Performance for user {self.user_id}: "
+                          f"Win Rate: {current_win_rate:.1f}% "
+                          f"(Expected: {expected_win_rate}%) "
+                          f"Avg PnL: ${avg_pnl:.2f} "
+                          f"Trades: {total_trades}")
+                
+        except Exception as e:
+            logger.error(f"❌ Strategy metrics calculation error: {e}")
+
     async def _calculate_realtime_pnl(self):
-        """Real-time PnL calculation - aynı kalıyor"""
+        """Real-time PnL calculation"""
         try:
             if self.status["position_side"] and self.current_price and self.status["entry_price"]:
                 entry_price = self.status["entry_price"]
@@ -373,7 +484,7 @@ class BotCore:
         if not self.status["is_running"]:
             return
             
-        logger.info(f"🛑 Stopping optimized bot for user {self.user_id}")
+        logger.info(f"🛑 Stopping profitable {self.status['timeframe']} bot for user {self.user_id}")
         self._stop_requested = True
         
         # Task cleanup - optimize edildi ✅
@@ -398,27 +509,36 @@ class BotCore:
             "last_check_time": datetime.now(timezone.utc).isoformat()
         })
         
-        logger.info(f"✅ Optimized bot stopped for user {self.user_id}")
-
-    # WebSocket loop kaldırıldı - artık gerekli değil ✅
+        logger.info(f"✅ Profitable {self.status['timeframe']} bot stopped for user {self.user_id}")
 
     async def _strategy_loop(self):
-        """Main strategy execution loop - EMA Crossover için optimize edildi"""
-        logger.info(f"📈 EMA Crossover strategy loop started for user {self.user_id}")
+        """Main strategy execution loop - ✅ Profitable strategy optimized"""
+        logger.info(f"📈 {self.status['strategy_type'].title()} strategy loop started for user {self.user_id} ({self.status['timeframe']})")
         
         while not self._stop_requested and self.status["is_running"]:
             try:
-                if len(self.klines_data) >= 25 and self.current_price:  # EMA21 + buffer
+                required_candles = max(self.timeframe_strategy.config["ema_slow"] + 10, 25)
+                if len(self.klines_data) >= required_candles and self.current_price:
                     await self._execute_trading_strategy()
                 
-                await asyncio.sleep(10)  # 10 saniye interval (EMA için)
+                # Strategy type'a göre interval ayarla
+                strategy_intervals = {
+                    "scalping": 10,      # 10 saniye (5m)
+                    "swing": 15,         # 15 saniye (15m)
+                    "trend_following": 30, # 30 saniye (30m)
+                    "position": 60,      # 1 dakika (1h)
+                    "major_trend": 120   # 2 dakika (4h)
+                }
+                
+                interval = strategy_intervals.get(self.status["strategy_type"], 15)
+                await asyncio.sleep(interval)
                 
             except Exception as e:
                 logger.error(f"❌ Strategy loop error for user {self.user_id}: {e}")
                 await asyncio.sleep(30)
 
     async def _execute_trading_strategy(self):
-        """EMA Crossover trading strategy execution - aynı kalıyor"""
+        """✅ Profitable trading strategy execution"""
         try:
             current_time = time.time()
             
@@ -438,7 +558,7 @@ class BotCore:
             if signal == "HOLD":
                 return
             
-            logger.debug(f"📊 EMA Strategy execution for user {self.user_id}: Signal={signal}, Position={current_position}")
+            logger.debug(f"📊 {self.status['strategy_type']} execution for user {self.user_id}: Signal={signal}, Position={current_position}")
             
             # No position, open new position
             if not current_position and signal in ["LONG", "SHORT"]:
@@ -450,7 +570,7 @@ class BotCore:
             if current_position:
                 # Opposite signal - flip position
                 if signal != current_position and signal in ["LONG", "SHORT"]:
-                    logger.info(f"🔄 EMA Crossover flip signal for user {self.user_id}: {current_position} -> {signal}")
+                    logger.info(f"🔄 {self.status['strategy_type']} flip signal for user {self.user_id}: {current_position} -> {signal}")
                     await self._flip_position(signal, self.current_price)
                     return
                 
@@ -458,12 +578,13 @@ class BotCore:
                 await self._check_exit_conditions()
                 
         except Exception as e:
-            logger.error(f"❌ EMA trading strategy execution error for user {self.user_id}: {e}")
+            logger.error(f"❌ {self.status['strategy_type']} trading strategy execution error for user {self.user_id}: {e}")
 
     async def _open_position(self, signal: str, entry_price: float):
-        """EMA Crossover position opening - aynı kalıyor"""
+        """✅ Position opening with strategy-based SL/TP"""
         try:
-            logger.info(f"📈 Opening {signal} position for user {self.user_id} at ${entry_price:.2f} (EMA Crossover)")
+            logger.info(f"💰 Opening {signal} position for user {self.user_id} at ${entry_price:.2f} "
+                       f"({self.status['timeframe']} {self.status['strategy_type']} strategy)")
             
             # Pre-trade cleanup
             await self.binance_client.cancel_all_orders_safe(self.status["symbol"])
@@ -501,7 +622,7 @@ class BotCore:
                     self.status.update({
                         "position_side": signal,
                         "entry_price": entry_price,
-                        "status_message": f"✅ {signal} pozisyonu açıldı: ${entry_price:.2f} (EMA)",
+                        "status_message": f"✅ {signal} pozisyonu açıldı: ${entry_price:.2f} ({self.status['strategy_type']})",
                         "total_trades": self.status["total_trades"] + 1,
                         "last_trade_time": time.time()
                     })
@@ -514,31 +635,31 @@ class BotCore:
                         "side": signal,
                         "quantity": quantity,
                         "price": entry_price,
-                        "strategy": "EMA_CROSSOVER",
+                        "strategy": f"{self.status['timeframe']}_{self.status['strategy_type']}",
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
                     
-                    logger.info(f"✅ EMA Crossover position opened successfully for user {self.user_id}: {signal} at ${entry_price:.2f}")
+                    logger.info(f"✅ {self.status['strategy_type']} position opened for user {self.user_id}: {signal} at ${entry_price:.2f}")
                     return True
                 else:
-                    logger.error(f"❌ Failed to open EMA position for user {self.user_id}")
+                    logger.error(f"❌ Failed to open {self.status['strategy_type']} position for user {self.user_id}")
                     return False
                     
             except Exception as order_error:
-                logger.error(f"❌ EMA order placement error for user {self.user_id}: {order_error}")
+                logger.error(f"❌ {self.status['strategy_type']} order placement error for user {self.user_id}: {order_error}")
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ EMA position opening error for user {self.user_id}: {e}")
+            logger.error(f"❌ {self.status['strategy_type']} position opening error for user {self.user_id}: {e}")
             return False
 
     async def _flip_position(self, new_signal: str, current_price: float):
-        """EMA Crossover position flipping - aynı kalıyor"""
+        """Position flipping"""
         try:
-            logger.info(f"🔄 EMA Crossover flipping position for user {self.user_id}: {self.status['position_side']} -> {new_signal} at ${current_price:.2f}")
+            logger.info(f"🔄 {self.status['strategy_type']} flipping position for user {self.user_id}: {self.status['position_side']} -> {new_signal} at ${current_price:.2f}")
             
             # Close current position first
-            close_result = await self._close_position("EMA_FLIP")
+            close_result = await self._close_position("STRATEGY_FLIP")
             
             if close_result:
                 await asyncio.sleep(1)  # Brief pause
@@ -546,10 +667,10 @@ class BotCore:
                 await self._open_position(new_signal, current_price)
             
         except Exception as e:
-            logger.error(f"❌ EMA position flip error for user {self.user_id}: {e}")
+            logger.error(f"❌ {self.status['strategy_type']} position flip error for user {self.user_id}: {e}")
 
     async def _close_position(self, reason: str = "SIGNAL"):
-        """Position closing - aynı kalıyor"""
+        """Position closing using optimized client"""
         try:
             if not self.status["position_side"]:
                 return False
@@ -588,7 +709,7 @@ class BotCore:
                     "entry_price": 0.0,
                     "unrealized_pnl": 0.0,
                     "total_pnl": self.status["total_pnl"] + pnl,
-                    "status_message": f"✅ Pozisyon kapatıldı - PnL: ${pnl:.2f}"
+                    "status_message": f"✅ Pozisyon kapatıldı - PnL: ${pnl:.2f} ({self.status['strategy_type']})"
                 })
                 
                 # Track consecutive losses
@@ -603,6 +724,7 @@ class BotCore:
                     "reason": reason,
                     "pnl": pnl,
                     "price": self.current_price,
+                    "strategy": f"{self.status['timeframe']}_{self.status['strategy_type']}",
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 })
                 
@@ -617,7 +739,7 @@ class BotCore:
             return False
 
     async def _check_exit_conditions(self):
-        """Exit conditions check - aynı kalıyor"""
+        """Exit conditions check"""
         try:
             if not self.status["position_side"] or not self.current_price or not self.status["entry_price"]:
                 return
@@ -682,7 +804,7 @@ class BotCore:
                 await asyncio.sleep(10)
 
     async def _update_status_message(self):
-        """Update status message - optimize edildi"""
+        """Update status message - ✅ Strategy optimized"""
         try:
             if self.current_price and self.symbol_validated:
                 position_text = ""
@@ -690,16 +812,24 @@ class BotCore:
                     pnl_text = f" (PnL: ${self.status.get('unrealized_pnl', 0):.2f})"
                     position_text = f" - {self.status['position_side']}{pnl_text}"
                 
-                signal_text = f" - EMA: {self.status['last_signal']}"
+                signal_text = f" - {self.status['last_signal']}"
                 price_text = f" (${self.current_price:.2f})"
+                strategy_text = f" [{self.status['timeframe']} {self.status['strategy_type'].title()}]"
                 
-                self.status["status_message"] = f"📈 EMA Bot aktif - {self.status['symbol']}{price_text}{position_text}{signal_text}"
+                # Performance indicator
+                performance_text = ""
+                if self.status.get("total_closed_trades", 0) > 3:
+                    win_rate = self.status.get("current_win_rate", 0)
+                    if win_rate > 0:
+                        performance_text = f" WR:{win_rate:.0f}%"
+                
+                self.status["status_message"] = f"💰 Bot aktif{strategy_text} - {self.status['symbol']}{price_text}{position_text}{signal_text}{performance_text}"
                 
         except Exception as e:
             logger.error(f"❌ Status message update error for user {self.user_id}: {e}")
 
     async def _update_user_data(self):
-        """Update user data in Firebase - aynı kalıyor"""
+        """Update user data in Firebase"""
         try:
             from app.main import firebase_db, firebase_initialized
             
@@ -707,6 +837,8 @@ class BotCore:
                 user_update = {
                     "bot_active": self.status["is_running"],
                     "bot_symbol": self.status["symbol"],
+                    "bot_timeframe": self.status["timeframe"],
+                    "bot_strategy": self.status["strategy_type"],
                     "bot_position": self.status["position_side"],
                     "total_trades": self.status["total_trades"],
                     "total_pnl": self.status["total_pnl"],
@@ -715,6 +847,9 @@ class BotCore:
                     "last_signal": self.status["last_signal"],
                     "unrealized_pnl": self.status.get("unrealized_pnl", 0),
                     "symbol_validated": self.symbol_validated,
+                    "current_win_rate": self.status.get("current_win_rate", 0),
+                    "expected_win_rate": self.status.get("expected_win_rate", 0),
+                    "strategy_performance": self.status.get("strategy_performance", "TRACKING"),
                     "last_bot_update": int(time.time() * 1000)
                 }
                 
@@ -725,7 +860,7 @@ class BotCore:
             logger.error(f"❌ User data update error for user {self.user_id}: {e}")
 
     async def _log_trade(self, trade_data: dict):
-        """Log trade to Firebase - aynı kalıyor"""
+        """Log trade to Firebase"""
         try:
             from app.main import firebase_db, firebase_initialized
             
@@ -733,6 +868,8 @@ class BotCore:
                 trade_log = {
                     "user_id": self.user_id,
                     "symbol": self.status["symbol"],
+                    "timeframe": self.status["timeframe"],
+                    "strategy_type": self.status["strategy_type"],
                     **trade_data
                 }
                 
@@ -750,7 +887,7 @@ class BotCore:
             logger.error(f"❌ Trade logging error for user {self.user_id}: {e}")
 
     def _calculate_position_size(self, order_size: float, leverage: int, price: float) -> float:
-        """Calculate position size with precision - aynı kalıyor"""
+        """Calculate position size with precision"""
         try:
             quantity = (order_size * leverage) / price
             return self._format_quantity(quantity)
@@ -758,14 +895,14 @@ class BotCore:
             return 0.0
 
     def _format_quantity(self, quantity: float) -> float:
-        """Format quantity with proper precision - aynı kalıyor"""
+        """Format quantity with proper precision"""
         if self.quantity_precision == 0:
             return math.floor(quantity)
         factor = 10 ** self.quantity_precision
         return math.floor(quantity * factor) / factor
 
     def _get_precision_from_filter(self, symbol_info: dict, filter_type: str, key: str) -> int:
-        """Get precision from symbol filters - aynı kalıyor"""
+        """Get precision from symbol filters"""
         try:
             for f in symbol_info.get('filters', []):
                 if f.get('filterType') == filter_type:
@@ -778,12 +915,13 @@ class BotCore:
         return 3 if filter_type == 'LOT_SIZE' else 2
 
     def get_status(self) -> dict:
-        """Get comprehensive bot status - aynı kalıyor"""
+        """Get comprehensive bot status - ✅ Strategy enhanced"""
         return {
             "user_id": self.user_id,
             "is_running": self.status["is_running"],
             "symbol": self.status["symbol"],
             "timeframe": self.status["timeframe"],
+            "strategy_type": self.status["strategy_type"],
             "leverage": self.status["leverage"],
             "position_side": self.status["position_side"],
             "status_message": self.status["status_message"],
@@ -803,5 +941,16 @@ class BotCore:
             "order_size": self.status["order_size"],
             "stop_loss": self.status["stop_loss"],
             "take_profit": self.status["take_profit"],
-            "last_price_update": self._last_price_update
+            "last_price_update": self._last_price_update,
+            
+            # ✅ Strategy performance data
+            "expected_win_rate": self.status.get("expected_win_rate", 0),
+            "current_win_rate": self.status.get("current_win_rate", 0),
+            "performance_vs_expected": self.status.get("performance_vs_expected", 1.0),
+            "total_closed_trades": self.status.get("total_closed_trades", 0),
+            "average_pnl_per_trade": self.status.get("average_pnl_per_trade", 0),
+            "consecutive_wins": self.status.get("consecutive_wins", 0),
+            "strategy_performance": self.status.get("strategy_performance", "TRACKING"),
+            "max_hold_time": self.status.get("max_hold_time", 0),
+            "risk_level": self.timeframe_strategy._get_risk_level() if hasattr(self, 'timeframe_strategy') else "MEDIUM"
         }
