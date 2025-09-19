@@ -6,6 +6,59 @@ let currentUser = null;
 let authToken = null;
 let tokenRefreshInterval = null;
 
+// ✅ ADDED: Smart Timeframe Recommendations
+const timeframeRecommendations = {
+    "5m": {
+        name: "🏃‍♂️ Hızlı Scalping",
+        stopLoss: 0.3,
+        takeProfit: 0.5,
+        winRate: 75,
+        description: "Günde 10-20 trade, güvenli kazanç",
+        riskLevel: "low",
+        maxHoldTime: "30 dakika"
+    },
+    "15m": {
+        name: "📈 Dengeli Swing", 
+        stopLoss: 0.8,
+        takeProfit: 1.2,
+        winRate: 70,
+        description: "Günde 5-10 trade, istikrarlı kar",
+        riskLevel: "low",
+        maxHoldTime: "2 saat"
+    },
+    "30m": {
+        name: "🎯 Trend Takip",
+        stopLoss: 1.0,
+        takeProfit: 2.0,
+        winRate: 65,
+        description: "Güçlü trend'lerde büyük kazanç",
+        riskLevel: "medium",
+        maxHoldTime: "5 saat"
+    },
+    "1h": {
+        name: "🏔️ Pozisyon Trading",
+        stopLoss: 1.5,
+        takeProfit: 3.0,
+        winRate: 60,
+        description: "Major hareketlerde yüksek kar",
+        riskLevel: "medium",
+        maxHoldTime: "12 saat"
+    },
+    "4h": {
+        name: "🚀 Major Trend",
+        stopLoss: 2.5,
+        takeProfit: 5.0,
+        winRate: 55,
+        description: "Büyük trend'lerde maksimum kazanç",
+        riskLevel: "high",
+        maxHoldTime: "48 saat"
+    }
+};
+
+// ✅ ADDED: Manual input tracking
+let manualSL = false;
+let manualTP = false;
+
 // Initialize Firebase
 async function initializeFirebase() {
     try {
@@ -171,6 +224,186 @@ function formatPercentage(value) {
     const num = parseFloat(value) || 0;
     const sign = num >= 0 ? '+' : '';
     return `${sign}${num.toFixed(2)}%`;
+}
+
+// ✅ ADDED: Advanced settings toggle
+function toggleAdvancedSettings() {
+    const content = document.getElementById('advanced-settings-content');
+    const toggle = document.getElementById('advanced-toggle');
+    
+    if (content && toggle) {
+        const isShowing = content.classList.contains('show');
+        
+        if (isShowing) {
+            content.classList.remove('show');
+            toggle.innerHTML = '<i class="fas fa-chevron-down"></i>';
+        } else {
+            content.classList.add('show');
+            toggle.innerHTML = '<i class="fas fa-chevron-up"></i>';
+        }
+    }
+}
+
+// ✅ ADDED: Smart Recommendations Logic
+function updateStrategyInfo(timeframe) {
+    const rec = timeframeRecommendations[timeframe];
+    if (!rec) return;
+
+    // Update strategy info card
+    const strategyName = document.getElementById('strategy-name');
+    const strategyDescription = document.getElementById('strategy-description');
+    const expectedWinRate = document.getElementById('expected-win-rate');
+    const maxHoldTime = document.getElementById('max-hold-time');
+    
+    if (strategyName) strategyName.textContent = rec.name;
+    if (strategyDescription) strategyDescription.textContent = rec.description;
+    if (expectedWinRate) expectedWinRate.textContent = `🎯 ${rec.winRate}% Win Rate`;
+    if (maxHoldTime) maxHoldTime.textContent = `⏱️ Max: ${rec.maxHoldTime}`;
+    
+    // Update risk badge
+    const riskBadge = document.getElementById('risk-badge');
+    if (riskBadge) {
+        riskBadge.className = `risk-badge ${rec.riskLevel}`;
+        riskBadge.textContent = rec.riskLevel === 'low' ? 'DÜŞÜK RİSK' : rec.riskLevel === 'medium' ? 'ORTA RİSK' : 'YÜKSEK RİSK';
+    }
+    
+    // Update recommended values
+    const slRecommendedValue = document.getElementById('sl-recommended-value');
+    const tpRecommendedValue = document.getElementById('tp-recommended-value');
+    
+    if (slRecommendedValue) slRecommendedValue.textContent = rec.stopLoss;
+    if (tpRecommendedValue) tpRecommendedValue.textContent = rec.takeProfit;
+    
+    // Auto-update if not manual
+    const stopLossInput = document.getElementById('stop-loss');
+    const takeProfitInput = document.getElementById('take-profit');
+    const slRecommendationBtn = document.getElementById('sl-recommendation-btn');
+    const tpRecommendationBtn = document.getElementById('tp-recommendation-btn');
+    
+    if (!manualSL && stopLossInput && slRecommendationBtn) {
+        stopLossInput.value = rec.stopLoss;
+        stopLossInput.classList.add('recommended-input');
+        stopLossInput.classList.remove('manual-input');
+        slRecommendationBtn.classList.add('active');
+        slRecommendationBtn.classList.remove('inactive');
+    }
+    
+    if (!manualTP && takeProfitInput && tpRecommendationBtn) {
+        takeProfitInput.value = rec.takeProfit;
+        takeProfitInput.classList.add('recommended-input');
+        takeProfitInput.classList.remove('manual-input');
+        tpRecommendationBtn.classList.add('active');
+        tpRecommendationBtn.classList.remove('inactive');
+    }
+}
+
+// ✅ ADDED: Setup smart recommendations event listeners
+function setupSmartRecommendations() {
+    // Initial strategy update
+    updateStrategyInfo('15m');
+    
+    // Timeframe change listener
+    const timeframeSelect = document.getElementById('timeframe-select');
+    if (timeframeSelect) {
+        timeframeSelect.addEventListener('change', function() {
+            updateStrategyInfo(this.value);
+        });
+    }
+    
+    // SL input change listener
+    const slInput = document.getElementById('stop-loss');
+    if (slInput) {
+        slInput.addEventListener('input', function() {
+            manualSL = true;
+            this.classList.add('manual-input');
+            this.classList.remove('recommended-input');
+            const slRecommendationBtn = document.getElementById('sl-recommendation-btn');
+            const slHint = document.getElementById('sl-hint');
+            if (slRecommendationBtn) {
+                slRecommendationBtn.classList.add('inactive');
+                slRecommendationBtn.classList.remove('active');
+            }
+            if (slHint) slHint.style.display = 'block';
+        });
+    }
+    
+    // TP input change listener
+    const tpInput = document.getElementById('take-profit');
+    if (tpInput) {
+        tpInput.addEventListener('input', function() {
+            manualTP = true;
+            this.classList.add('manual-input');
+            this.classList.remove('recommended-input');
+            const tpRecommendationBtn = document.getElementById('tp-recommendation-btn');
+            const tpHint = document.getElementById('tp-hint');
+            if (tpRecommendationBtn) {
+                tpRecommendationBtn.classList.add('inactive');
+                tpRecommendationBtn.classList.remove('active');
+            }
+            if (tpHint) tpHint.style.display = 'block';
+        });
+    }
+    
+    // SL recommendation button
+    const slRecBtn = document.getElementById('sl-recommendation-btn');
+    if (slRecBtn) {
+        slRecBtn.addEventListener('click', function() {
+            const timeframe = document.getElementById('timeframe-select').value;
+            const rec = timeframeRecommendations[timeframe];
+            if (rec) {
+                manualSL = false;
+                const stopLossInput = document.getElementById('stop-loss');
+                const slHint = document.getElementById('sl-hint');
+                if (stopLossInput) {
+                    stopLossInput.value = rec.stopLoss;
+                    stopLossInput.classList.add('recommended-input');
+                    stopLossInput.classList.remove('manual-input');
+                }
+                this.classList.add('active');
+                this.classList.remove('inactive');
+                if (slHint) slHint.style.display = 'none';
+            }
+        });
+    }
+    
+    // TP recommendation button
+    const tpRecBtn = document.getElementById('tp-recommendation-btn');
+    if (tpRecBtn) {
+        tpRecBtn.addEventListener('click', function() {
+            const timeframe = document.getElementById('timeframe-select').value;
+            const rec = timeframeRecommendations[timeframe];
+            if (rec) {
+                manualTP = false;
+                const takeProfitInput = document.getElementById('take-profit');
+                const tpHint = document.getElementById('tp-hint');
+                if (takeProfitInput) {
+                    takeProfitInput.value = rec.takeProfit;
+                    takeProfitInput.classList.add('recommended-input');
+                    takeProfitInput.classList.remove('manual-input');
+                }
+                this.classList.add('active');
+                this.classList.remove('inactive');
+                if (tpHint) tpHint.style.display = 'none';
+            }
+        });
+    }
+    
+    // Use recommended buttons
+    const useSLBtn = document.getElementById('use-sl-recommended');
+    if (useSLBtn) {
+        useSLBtn.addEventListener('click', function() {
+            const slRecommendationBtn = document.getElementById('sl-recommendation-btn');
+            if (slRecommendationBtn) slRecommendationBtn.click();
+        });
+    }
+    
+    const useTPBtn = document.getElementById('use-tp-recommended');
+    if (useTPBtn) {
+        useTPBtn.addEventListener('click', function() {
+            const tpRecommendationBtn = document.getElementById('tp-recommendation-btn');
+            if (tpRecommendationBtn) tpRecommendationBtn.click();
+        });
+    }
 }
 
 // Load user data
@@ -604,14 +837,22 @@ async function startBot() {
         const orderSize = document.getElementById('order-size');
         const stopLoss = document.getElementById('stop-loss');
         const takeProfit = document.getElementById('take-profit');
+        const maxDailyTrades = document.getElementById('max-daily-trades');
+        const autoCompound = document.getElementById('auto-compound');
+        const manualTrading = document.getElementById('manual-trading');
+        const notificationsEnabled = document.getElementById('notifications-enabled');
         
         const botConfig = {
             symbol: symbolSelect?.value || 'BTCUSDT',
             timeframe: timeframeSelect?.value || '15m',
             leverage: parseInt(leverageSelect?.value || '10'),
             order_size: parseFloat(orderSize?.value || '35'),
-            stop_loss: parseFloat(stopLoss?.value || '2'),
-            take_profit: parseFloat(takeProfit?.value || '4')
+            stop_loss: parseFloat(stopLoss?.value || '0.8'),
+            take_profit: parseFloat(takeProfit?.value || '1.2'),
+            max_daily_trades: parseInt(maxDailyTrades?.value || '10'),
+            auto_compound: autoCompound?.checked || false,
+            manual_trading: manualTrading?.checked || false,
+            notifications_enabled: notificationsEnabled?.checked || true
         };
         
         console.log('Starting bot with config:', botConfig);
@@ -1146,6 +1387,9 @@ function setupEventListeners() {
             }
         });
     });
+    
+    // ✅ ADDED: Setup smart recommendations
+    setupSmartRecommendations();
 }
 
 // Initialize dashboard
@@ -1249,3 +1493,4 @@ window.copyToClipboard = copyToClipboard;
 window.loadAccountData = loadAccountData;
 window.loadPositions = loadPositions;
 window.loadRecentActivity = loadRecentActivity;
+window.toggleAdvancedSettings = toggleAdvancedSettings;
