@@ -1,4 +1,4 @@
-// Dashboard JavaScript for EzyagoTrading
+// Dashboard JavaScript for EzyagoTrading (FULLY OPTIMIZED - Rate limit sorunu çözüldü)
 let firebaseApp = null;
 let auth = null;
 let database = null;
@@ -6,7 +6,7 @@ let currentUser = null;
 let authToken = null;
 let tokenRefreshInterval = null;
 
-// ✅ ADDED: Smart Timeframe Recommendations
+// ✅ Smart Timeframe Recommendations
 const timeframeRecommendations = {
     "5m": {
         name: "🏃‍♂️ Hızlı Scalping",
@@ -55,7 +55,7 @@ const timeframeRecommendations = {
     }
 };
 
-// ✅ ADDED: Manual input tracking
+// Manual input tracking
 let manualSL = false;
 let manualTP = false;
 
@@ -79,7 +79,7 @@ async function initializeFirebase() {
 async function getFreshToken() {
     try {
         if (currentUser) {
-            const token = await currentUser.getIdToken(true); // Force refresh
+            const token = await currentUser.getIdToken(true);
             authToken = token;
             console.log('Fresh auth token obtained');
             return token;
@@ -108,7 +108,6 @@ function setupTokenRefresh() {
 // API call helper with authentication
 async function makeAuthenticatedApiCall(endpoint, options = {}) {
     try {
-        // Ensure we have a fresh token
         if (!authToken) {
             console.log('No token available, getting fresh token...');
             await getFreshToken();
@@ -137,10 +136,8 @@ async function makeAuthenticatedApiCall(endpoint, options = {}) {
         if (!response.ok) {
             if (response.status === 401) {
                 console.log('401 error, refreshing token and retrying...');
-                // Try to refresh token once
                 try {
                     await getFreshToken();
-                    // Retry with new token
                     const retryOptions = {
                         ...mergedOptions,
                         headers: {
@@ -226,7 +223,7 @@ function formatPercentage(value) {
     return `${sign}${num.toFixed(2)}%`;
 }
 
-// ✅ ADDED: Advanced settings toggle
+// ✅ Advanced settings toggle
 function toggleAdvancedSettings() {
     const content = document.getElementById('advanced-settings-content');
     const toggle = document.getElementById('advanced-toggle');
@@ -244,7 +241,7 @@ function toggleAdvancedSettings() {
     }
 }
 
-// ✅ ADDED: Smart Recommendations Logic
+// ✅ Smart Recommendations Logic
 function updateStrategyInfo(timeframe) {
     const rec = timeframeRecommendations[timeframe];
     if (!rec) return;
@@ -297,7 +294,7 @@ function updateStrategyInfo(timeframe) {
     }
 }
 
-// ✅ ADDED: Setup smart recommendations event listeners
+// ✅ Setup smart recommendations event listeners
 function setupSmartRecommendations() {
     // Initial strategy update
     updateStrategyInfo('15m');
@@ -406,246 +403,280 @@ function setupSmartRecommendations() {
     }
 }
 
-// Load user data
-async function loadUserData() {
+// ✅ OPTIMIZED: Tek seferde tüm dashboard verilerini yükle (Rate limit çözümü)
+async function loadAllDashboardData() {
     try {
-        console.log('Loading user data from backend...');
+        console.log('Loading dashboard data with optimized single API call...');
         
+        // ✅ TEK API ÇAĞRISI - 8 yerine 1 çağrı
+        const data = await makeAuthenticatedApiCall('/api/user/dashboard-data');
+        
+        // Update all UI elements
+        updateProfile(data.profile);
+        updateAccount(data.account);
+        updatePositions(data.positions);
+        updateStats(data.stats);
+        updateApiStatus(data.api_status);
+        
+        console.log('✅ Dashboard data loaded successfully with single API call');
+        showNotification('Dashboard başarıyla yüklendi!', 'success', 2000);
+        
+    } catch (error) {
+        console.error('Dashboard data load failed:', error);
+        showNotification('Dashboard verileri yüklenirken hata oluştu', 'error');
+        
+        // Fallback: Load basic data
+        try {
+            await loadFallbackData();
+        } catch (fallbackError) {
+            console.error('Fallback data load also failed:', fallbackError);
+        }
+    }
+}
+
+// ✅ Fallback data loading
+async function loadFallbackData() {
+    console.log('Loading fallback data...');
+    
+    try {
+        // Load only essential data individually if main endpoint fails
         const profile = await makeAuthenticatedApiCall('/api/user/profile');
+        updateProfile(profile);
         
-        // Update UI with profile data
-        const userName = document.getElementById('user-name');
-        const subscriptionText = document.getElementById('subscription-text');
-        const subStatusBadge = document.getElementById('sub-status-badge');
-        const daysRemaining = document.getElementById('days-remaining');
-        const subscriptionNote = document.getElementById('subscription-note');
-        
-        if (userName) userName.textContent = profile.email || 'Kullanıcı';
-        
-        if (profile.subscription) {
-            if (subscriptionText) subscriptionText.textContent = profile.subscription.plan || 'Premium';
-            if (subStatusBadge) {
-                const statusSpan = subStatusBadge.querySelector('span');
-                if (statusSpan) statusSpan.textContent = profile.subscription.status === 'active' ? 'Aktif' : 'Deneme';
-            }
-            
-            if (daysRemaining) {
-                const daysLeft = profile.subscription.daysRemaining || 0;
-                daysRemaining.textContent = daysLeft > 0 ? `${daysLeft} gün kaldı` : 'Süresi dolmuş';
-                
-                if (subscriptionNote) {
-                    if (daysLeft <= 7 && daysLeft > 0) {
-                        subscriptionNote.textContent = 'Aboneliğiniz yakında sona erecek. Yenilemeyi unutmayın!';
-                        subscriptionNote.style.color = 'var(--warning-color)';
-                    } else if (daysLeft <= 0) {
-                        subscriptionNote.textContent = 'Abonelik süresi dolmuş. Lütfen yenileyin.';
-                        subscriptionNote.style.color = 'var(--danger-color)';
-                    } else {
-                        subscriptionNote.textContent = 'Aboneliğiniz aktif durumda.';
-                        subscriptionNote.style.color = 'var(--success-color)';
-                    }
-                }
-            }
-        }
-        
-        console.log('User data loaded successfully from backend');
-        
-    } catch (error) {
-        console.error('Error loading user data from backend:', error);
-        showNotification('Kullanıcı verileri yüklenemedi', 'error');
-        
-        // Fallback to Firebase direct access
-        if (currentUser && database) {
-            try {
-                const userRef = database.ref(`users/${currentUser.uid}`);
-                const snapshot = await userRef.once('value');
-                const userData = snapshot.val();
-                
-                if (userData) {
-                    const userName = document.getElementById('user-name');
-                    if (userName) userName.textContent = userData.email || currentUser.email || 'Kullanıcı';
-                    console.log('Fallback user data loaded from Firebase');
-                }
-            } catch (fbError) {
-                console.error('Firebase fallback failed:', fbError);
-            }
-        }
-    }
-}
-
-// Load account data
-async function loadAccountData() {
-    try {
-        console.log('Loading account data from backend...');
-        
-        const accountData = await makeAuthenticatedApiCall('/api/user/account');
         const stats = await makeAuthenticatedApiCall('/api/user/stats');
+        updateStats(stats);
         
-        // Update account stats
-        const totalBalance = document.getElementById('total-balance');
-        const totalTrades = document.getElementById('total-trades');
-        const winRate = document.getElementById('win-rate');
-        const totalPnl = document.getElementById('total-pnl');
+        showNotification('Temel veriler yüklendi (sınırlı mod)', 'warning');
         
-        if (totalBalance) totalBalance.textContent = formatCurrency(accountData.totalBalance || 0);
-        if (totalTrades) totalTrades.textContent = stats.totalTrades || '0';
-        if (winRate) winRate.textContent = formatPercentage(stats.winRate || 0);
-        if (totalPnl) {
-            totalPnl.textContent = formatCurrency(stats.totalPnl || 0);
-            const pnlValue = parseFloat(stats.totalPnl || 0);
-            if (pnlValue > 0) {
-                totalPnl.style.color = 'var(--success-color)';
-            } else if (pnlValue < 0) {
-                totalPnl.style.color = 'var(--danger-color)';
-            } else {
-                totalPnl.style.color = 'var(--text-primary)';
+    } catch (error) {
+        console.error('Fallback data load failed:', error);
+        // Show empty state
+        updateProfile({ email: 'Kullanıcı', subscription: { status: 'trial' } });
+        updateStats({ totalTrades: 0, totalPnl: 0, winRate: 0 });
+    }
+}
+
+// Update profile UI
+function updateProfile(profile) {
+    const userName = document.getElementById('user-name');
+    const subscriptionText = document.getElementById('subscription-text');
+    const subStatusBadge = document.getElementById('sub-status-badge');
+    const daysRemaining = document.getElementById('days-remaining');
+    const subscriptionNote = document.getElementById('subscription-note');
+    
+    if (userName) userName.textContent = profile.email || 'Kullanıcı';
+    
+    if (profile.subscription) {
+        if (subscriptionText) subscriptionText.textContent = profile.subscription.plan || 'Premium';
+        if (subStatusBadge) {
+            const statusSpan = subStatusBadge.querySelector('span');
+            if (statusSpan) statusSpan.textContent = profile.subscription.status === 'active' ? 'Aktif' : 'Deneme';
+        }
+        
+        if (daysRemaining) {
+            const daysLeft = profile.subscription.daysRemaining || 0;
+            daysRemaining.textContent = daysLeft > 0 ? `${daysLeft} gün kaldı` : 'Süresi dolmuş';
+            
+            if (subscriptionNote) {
+                if (daysLeft <= 7 && daysLeft > 0) {
+                    subscriptionNote.textContent = 'Aboneliğiniz yakında sona erecek. Yenilemeyi unutmayın!';
+                    subscriptionNote.style.color = 'var(--warning-color)';
+                } else if (daysLeft <= 0) {
+                    subscriptionNote.textContent = 'Abonelik süresi dolmuş. Lütfen yenileyin.';
+                    subscriptionNote.style.color = 'var(--danger-color)';
+                } else {
+                    subscriptionNote.textContent = 'Aboneliğiniz aktif durumda.';
+                    subscriptionNote.style.color = 'var(--success-color)';
+                }
             }
         }
-        
-        console.log('Account data loaded successfully from backend');
-        
-    } catch (error) {
-        console.error('Error loading account data from backend:', error);
-        showNotification('Hesap verileri yüklenemedi', 'error');
     }
 }
 
-// Load positions
-async function loadPositions() {
-    try {
-        console.log('Loading positions from backend...');
-        
-        const positions = await makeAuthenticatedApiCall('/api/user/positions');
-        
-        const positionsContainer = document.getElementById('positions-container');
-        if (!positionsContainer) return;
-        
-        if (!positions || positions.length === 0) {
-            positionsContainer.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-chart-line"></i>
-                    <h3>Açık Pozisyon Yok</h3>
-                    <p>Bot başlatıldığında pozisyonlar burada görünecek</p>
-                </div>
-            `;
-            return;
-        }
-
-        const positionsHTML = positions.map(position => {
-            const pnlClass = position.unrealizedPnl >= 0 ? 'profit' : 'loss';
-            const sideClass = position.positionSide.toLowerCase();
-            
-            return `
-                <div class="position-item">
-                    <div class="position-header">
-                        <span class="position-symbol">${position.symbol}</span>
-                        <span class="position-side ${sideClass}">${position.positionSide}</span>
-                    </div>
-                    <div class="position-stats">
-                        <div class="position-stat">
-                            <div class="stat-label">Boyut</div>
-                            <div class="stat-value">${Math.abs(position.positionAmt)} ${position.symbol.replace('USDT', '')}</div>
-                        </div>
-                        <div class="position-stat">
-                            <div class="stat-label">Giriş Fiyatı</div>
-                            <div class="stat-value">$${parseFloat(position.entryPrice).toFixed(2)}</div>
-                        </div>
-                        <div class="position-stat">
-                            <div class="stat-label">Güncel Fiyat</div>
-                            <div class="stat-value">$${parseFloat(position.markPrice).toFixed(2)}</div>
-                        </div>
-                        <div class="position-stat">
-                            <div class="stat-label">P&L</div>
-                            <div class="stat-value ${pnlClass}">${formatCurrency(position.unrealizedPnl)}</div>
-                        </div>
-                    </div>
-                    <div class="position-actions">
-                        <button class="btn btn-danger btn-sm" onclick="closePosition('${position.symbol}', '${position.positionSide}')">
-                            <i class="fas fa-times"></i> Pozisyonu Kapat
-                        </button>
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        positionsContainer.innerHTML = positionsHTML;
-        console.log('Positions loaded successfully from backend');
-        
-    } catch (error) {
-        console.error('Error loading positions from backend:', error);
-        const positionsContainer = document.getElementById('positions-container');
-        if (positionsContainer) {
-            positionsContainer.innerHTML = `
-                <div class="error-state">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <h3>Pozisyonlar Yüklenemedi</h3>
-                    <p>Pozisyon verileri alınırken hata oluştu</p>
-                    <button class="btn btn-primary btn-sm" onclick="loadPositions()">Tekrar Dene</button>
-                </div>
-            `;
+// Update account UI
+function updateAccount(account) {
+    const totalBalance = document.getElementById('total-balance');
+    const totalPnl = document.getElementById('total-pnl');
+    
+    if (totalBalance) totalBalance.textContent = formatCurrency(account.totalBalance || 0);
+    
+    if (totalPnl) {
+        totalPnl.textContent = formatCurrency(account.unrealizedPnl || 0);
+        const pnlValue = parseFloat(account.unrealizedPnl || 0);
+        if (pnlValue > 0) {
+            totalPnl.style.color = 'var(--success-color)';
+        } else if (pnlValue < 0) {
+            totalPnl.style.color = 'var(--danger-color)';
+        } else {
+            totalPnl.style.color = 'var(--text-primary)';
         }
     }
 }
 
-// Load recent activity
-async function loadRecentActivity() {
-    try {
-        console.log('Loading recent activity from backend...');
+// Update positions UI
+function updatePositions(positions) {
+    const positionsContainer = document.getElementById('positions-container');
+    if (!positionsContainer) return;
+    
+    if (!positions || positions.length === 0) {
+        positionsContainer.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-chart-line"></i>
+                <h3>Açık Pozisyon Yok</h3>
+                <p>Bot başlatıldığında pozisyonlar burada görünecek</p>
+            </div>
+        `;
+        return;
+    }
+
+    const positionsHTML = positions.map(position => {
+        const pnlClass = position.unrealizedPnl >= 0 ? 'profit' : 'loss';
+        const sideClass = position.positionSide.toLowerCase();
         
-        const trades = await makeAuthenticatedApiCall('/api/user/recent-trades?limit=10');
-        
-        const activityList = document.getElementById('activity-list');
-        if (!activityList) return;
-        
-        if (!trades || trades.length === 0) {
-            activityList.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-history"></i>
-                    <h3>Henüz İşlem Yok</h3>
-                    <p>Bot başladığında işlemler burada görünecek</p>
+        return `
+            <div class="position-item">
+                <div class="position-header">
+                    <span class="position-symbol">${position.symbol}</span>
+                    <span class="position-side ${sideClass}">${position.positionSide}</span>
                 </div>
-            `;
-            return;
+                <div class="position-stats">
+                    <div class="position-stat">
+                        <div class="stat-label">Boyut</div>
+                        <div class="stat-value">${Math.abs(position.positionAmt)} ${position.symbol.replace('USDT', '')}</div>
+                    </div>
+                    <div class="position-stat">
+                        <div class="stat-label">Giriş Fiyatı</div>
+                        <div class="stat-value">$${parseFloat(position.entryPrice).toFixed(2)}</div>
+                    </div>
+                    <div class="position-stat">
+                        <div class="stat-label">Güncel Fiyat</div>
+                        <div class="stat-value">$${parseFloat(position.markPrice).toFixed(2)}</div>
+                    </div>
+                    <div class="position-stat">
+                        <div class="stat-label">P&L</div>
+                        <div class="stat-value ${pnlClass}">${formatCurrency(position.unrealizedPnl)}</div>
+                    </div>
+                </div>
+                <div class="position-actions">
+                    <button class="btn btn-danger btn-sm" onclick="closePosition('${position.symbol}', '${position.positionSide}')">
+                        <i class="fas fa-times"></i> Pozisyonu Kapat
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    positionsContainer.innerHTML = positionsHTML;
+}
+
+// Update stats UI
+function updateStats(stats) {
+    const totalTrades = document.getElementById('total-trades');
+    const winRate = document.getElementById('win-rate');
+    const totalPnl = document.getElementById('total-pnl');
+    
+    if (totalTrades) totalTrades.textContent = stats.totalTrades || '0';
+    if (winRate) winRate.textContent = formatPercentage(stats.winRate || 0);
+    if (totalPnl) {
+        totalPnl.textContent = formatCurrency(stats.totalPnl || 0);
+        const pnlValue = parseFloat(stats.totalPnl || 0);
+        if (pnlValue > 0) {
+            totalPnl.style.color = 'var(--success-color)';
+        } else if (pnlValue < 0) {
+            totalPnl.style.color = 'var(--danger-color)';
+        } else {
+            totalPnl.style.color = 'var(--text-primary)';
         }
+    }
+}
 
-        const tradesHTML = trades.map(trade => {
-            const sideClass = trade.side === 'BUY' || trade.side === 'LONG' ? 'success' : 'warning';
-            const icon = trade.side === 'BUY' || trade.side === 'LONG' ? 'fa-arrow-up' : 'fa-arrow-down';
-            const pnlClass = trade.pnl >= 0 ? 'profit' : 'loss';
-            
-            return `
-                <div class="activity-item">
-                    <div class="activity-icon ${sideClass}">
-                        <i class="fas ${icon}"></i>
-                    </div>
-                    <div class="activity-content">
-                        <div class="activity-title">
-                            ${trade.side} ${trade.symbol} - ${formatCurrency(trade.quoteQty || trade.quantity * trade.price)}
-                            ${trade.pnl ? `<span class="${pnlClass}"> (${formatCurrency(trade.pnl)})</span>` : ''}
-                        </div>
-                        <div class="activity-time">${new Date(trade.time).toLocaleString('tr-TR')}</div>
-                        <div class="activity-status">${trade.status || 'FILLED'}</div>
-                    </div>
-                </div>
+// Update API status UI
+function updateApiStatus(apiStatus) {
+    const apiStatusIndicator = document.getElementById('api-status-indicator');
+    const manageApiBtn = document.getElementById('manage-api-btn');
+    const tradingSettings = document.getElementById('trading-settings');
+    const controlButtons = document.getElementById('control-buttons');
+    const statusMessageText = document.getElementById('status-message-text');
+    
+    if (apiStatus.hasApiKeys && apiStatus.isConnected) {
+        // API connected
+        if (apiStatusIndicator) {
+            apiStatusIndicator.innerHTML = `
+                <i class="fas fa-check-circle"></i>
+                <span>API bağlantısı aktif</span>
             `;
-        }).join('');
+            apiStatusIndicator.className = 'api-status-indicator connected';
+        }
+        
+        if (manageApiBtn) {
+            manageApiBtn.style.display = 'inline-flex';
+            manageApiBtn.textContent = 'API Ayarlarını Düzenle';
+        }
+        
+        if (tradingSettings) tradingSettings.style.display = 'block';
+        if (controlButtons) controlButtons.style.display = 'grid';
+        if (statusMessageText) statusMessageText.textContent = 'Bot hazır. Ayarları yapılandırıp başlatabilirsiniz.';
+        
+        // Load trading pairs
+        loadTradingPairs();
+        
+    } else if (apiStatus.hasApiKeys && !apiStatus.isConnected) {
+        // API error
+        if (apiStatusIndicator) {
+            apiStatusIndicator.innerHTML = `
+                <i class="fas fa-times-circle"></i>
+                <span>API bağlantı hatası</span>
+            `;
+            apiStatusIndicator.className = 'api-status-indicator error';
+        }
+        
+        if (manageApiBtn) {
+            manageApiBtn.style.display = 'inline-flex';
+            manageApiBtn.textContent = 'API Anahtarlarını Düzenle';
+        }
+        
+        if (statusMessageText) statusMessageText.textContent = apiStatus.message || 'API bağlantı hatası';
+        
+    } else {
+        // No API keys
+        if (apiStatusIndicator) {
+            apiStatusIndicator.innerHTML = `
+                <i class="fas fa-exclamation-triangle"></i>
+                <span>API anahtarları gerekli</span>
+            `;
+            apiStatusIndicator.className = 'api-status-indicator error';
+        }
+        
+        if (manageApiBtn) {
+            manageApiBtn.style.display = 'inline-flex';
+            manageApiBtn.textContent = 'API Anahtarlarını Ekle';
+        }
+        
+        if (statusMessageText) statusMessageText.textContent = 'Bot\'u çalıştırmak için API anahtarlarınızı eklemelisiniz.';
+    }
+}
 
-        activityList.innerHTML = tradesHTML;
-        console.log('Recent activity loaded successfully from backend');
+// Load trading pairs
+async function loadTradingPairs() {
+    try {
+        const response = await makeAuthenticatedApiCall('/api/bot/trading-pairs');
+        
+        const symbolSelect = document.getElementById('symbol-select');
+        if (symbolSelect && response) {
+            symbolSelect.innerHTML = '';
+            response.forEach(pair => {
+                const option = document.createElement('option');
+                option.value = pair.symbol;
+                option.textContent = `${pair.baseAsset}/${pair.quoteAsset}`;
+                symbolSelect.appendChild(option);
+            });
+            
+            // Set default to BTCUSDT
+            symbolSelect.value = 'BTCUSDT';
+        }
         
     } catch (error) {
-        console.error('Error loading recent activity from backend:', error);
-        const activityList = document.getElementById('activity-list');
-        if (activityList) {
-            activityList.innerHTML = `
-                <div class="error-state">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <h3>İşlemler Yüklenemedi</h3>
-                    <p>İşlem geçmişi alınırken hata oluştu</p>
-                    <button class="btn btn-primary btn-sm" onclick="loadRecentActivity()">Tekrar Dene</button>
-                </div>
-            `;
-        }
+        console.error('Error loading trading pairs:', error);
     }
 }
 
@@ -676,108 +707,6 @@ async function loadPaymentAndServerInfo() {
         
     } catch (error) {
         console.error('Error loading payment info:', error);
-    }
-}
-
-// Check API status
-async function checkApiStatus() {
-    try {
-        console.log('Checking API status...');
-        
-        const response = await makeAuthenticatedApiCall('/api/bot/api-status');
-        
-        const apiStatusIndicator = document.getElementById('api-status-indicator');
-        const manageApiBtn = document.getElementById('manage-api-btn');
-        const tradingSettings = document.getElementById('trading-settings');
-        const controlButtons = document.getElementById('control-buttons');
-        const statusMessageText = document.getElementById('status-message-text');
-        
-        if (response.hasApiKeys && response.isConnected) {
-            // API connected
-            if (apiStatusIndicator) {
-                apiStatusIndicator.innerHTML = `
-                    <i class="fas fa-check-circle"></i>
-                    <span>API bağlantısı aktif</span>
-                `;
-                apiStatusIndicator.className = 'api-status-indicator connected';
-            }
-            
-            if (manageApiBtn) {
-                manageApiBtn.style.display = 'inline-flex';
-                manageApiBtn.textContent = 'API Ayarlarını Düzenle';
-            }
-            
-            if (tradingSettings) tradingSettings.style.display = 'block';
-            if (controlButtons) controlButtons.style.display = 'grid';
-            if (statusMessageText) statusMessageText.textContent = 'Bot hazır. Ayarları yapılandırıp başlatabilirsiniz.';
-            
-            // Load trading pairs
-            await loadTradingPairs();
-            
-        } else if (response.hasApiKeys && !response.isConnected) {
-            // API error
-            if (apiStatusIndicator) {
-                apiStatusIndicator.innerHTML = `
-                    <i class="fas fa-times-circle"></i>
-                    <span>API bağlantı hatası</span>
-                `;
-                apiStatusIndicator.className = 'api-status-indicator error';
-            }
-            
-            if (manageApiBtn) {
-                manageApiBtn.style.display = 'inline-flex';
-                manageApiBtn.textContent = 'API Anahtarlarını Düzenle';
-            }
-            
-            if (statusMessageText) statusMessageText.textContent = response.message || 'API bağlantı hatası';
-            
-        } else {
-            // No API keys
-            if (apiStatusIndicator) {
-                apiStatusIndicator.innerHTML = `
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <span>API anahtarları gerekli</span>
-                `;
-                apiStatusIndicator.className = 'api-status-indicator error';
-            }
-            
-            if (manageApiBtn) {
-                manageApiBtn.style.display = 'inline-flex';
-                manageApiBtn.textContent = 'API Anahtarlarını Ekle';
-            }
-            
-            if (statusMessageText) statusMessageText.textContent = 'Bot\'u çalıştırmak için API anahtarlarınızı eklemelisiniz.';
-        }
-        
-        console.log('API status checked successfully');
-        
-    } catch (error) {
-        console.error('Error checking API status:', error);
-        showNotification('API durumu kontrol edilemedi', 'error');
-    }
-}
-
-// Load trading pairs
-async function loadTradingPairs() {
-    try {
-        const response = await makeAuthenticatedApiCall('/api/trading/pairs');
-        
-        const symbolSelect = document.getElementById('symbol-select');
-        if (symbolSelect && response) {
-            symbolSelect.innerHTML = '';
-            response.forEach(pair => {
-                const option = document.createElement('option');
-                option.value = pair.symbol;
-                option.textContent = `${pair.baseAsset}/${pair.quoteAsset}`;
-                symbolSelect.appendChild(option);
-            });
-            
-            // Set default to BTCUSDT
-            symbolSelect.value = 'BTCUSDT';
-        }
-        
-    } catch (error) {
-        console.error('Error loading trading pairs:', error);
     }
 }
 
@@ -937,9 +866,9 @@ async function closePosition(symbol, positionSide) {
 
         if (response.success) {
             showNotification('Pozisyon başarıyla kapatıldı!', 'success');
-            await loadPositions();
-            await loadAccountData();
-            await loadRecentActivity();
+            // Refresh data
+            await loadAllDashboardData();
+            await getBotStatus();
         } else {
             throw new Error(response.message || 'Pozisyon kapatılamadı');
         }
@@ -955,44 +884,28 @@ async function openApiModal() {
     if (apiModal) {
         apiModal.classList.add('show');
 
-        // Input alanlarını ve durum göstergesini önceden temizle
+        // Clear inputs
         const apiKeyInput = document.getElementById('api-key');
         const apiSecretInput = document.getElementById('api-secret');
         const apiTestnetCheckbox = document.getElementById('api-testnet');
-        const apiStatusIcon = document.getElementById('api-status-icon');
 
         if (apiKeyInput) apiKeyInput.value = '';
-        if (apiSecretInput) apiSecretInput.placeholder = 'API Secret'; // Varsayılan placeholder'a dön
+        if (apiSecretInput) apiSecretInput.placeholder = 'API Secret';
         if (apiTestnetCheckbox) apiTestnetCheckbox.checked = false;
-        
-        if (apiStatusIcon) {
-            apiStatusIcon.className = 'fas fa-spinner fa-spin api-status-icon-pending';
-        }
 
         try {
-            // API'den mevcut API key bilgilerini yükle
+            // Load existing API info
             const apiInfo = await makeAuthenticatedApiCall('/api/user/api-info');
 
-            // Başarılı olursa, alanları gelen verilerle doldur
             if (apiInfo.hasKeys) {
                 if (apiKeyInput) apiKeyInput.value = apiInfo.maskedApiKey || '';
-                if (apiTestnetCheckbox) apiTestnetCheckbox.checked = apiInfo.is_testnet || false; // Backend'den gelen is_testnet değerini kullan
+                if (apiTestnetCheckbox) apiTestnetCheckbox.checked = apiInfo.is_testnet || false;
                 if (apiSecretInput) apiSecretInput.placeholder = 'Mevcut secret korunuyor (değiştirmek için yeni girin)';
-            }
-            
-            // API durumunu başarılı olarak güncelle
-            if (apiStatusIcon) {
-                apiStatusIcon.className = 'fas fa-check-circle api-status-icon-success';
             }
 
         } catch (error) {
-            // Hata olursa, kullanıcıya bilgi ver ve alanları temiz tut
             console.error('API keys load error:', error);
             showNotification('API key bilgileri yüklenirken hata oluştu. Lütfen tekrar deneyin.', 'error');
-            
-            if (apiStatusIcon) {
-                apiStatusIcon.className = 'fas fa-times-circle api-status-icon-error';
-            }
         }
     }
 }
@@ -1054,8 +967,8 @@ async function saveApiKeys(event) {
             
             setTimeout(() => {
                 closeApiModal();
-                checkApiStatus();
-                loadAccountData();
+                // Refresh dashboard data
+                loadAllDashboardData();
             }, 2000);
             
         } else {
@@ -1221,11 +1134,14 @@ function startPeriodicUpdates() {
     
     updateInterval = setInterval(async () => {
         try {
-            await Promise.all([
-                loadAccountData(),
-                loadPositions(),
-                getBotStatus()
-            ]);
+            // ✅ Optimized: Sadece bot status al, dashboard verilerini tekrar yükleme
+            await getBotStatus();
+            
+            // 5 dakikada bir dashboard verilerini yenile
+            const now = new Date().getMinutes();
+            if (now % 5 === 0) {
+                await loadAllDashboardData();
+            }
         } catch (error) {
             console.error('Periodic update error:', error);
         }
@@ -1345,14 +1261,15 @@ function setupEventListeners() {
         });
     }
     
-    // Refresh buttons
+    // Refresh buttons - Optimized
     const refreshAccountBtn = document.getElementById('refresh-account-btn');
     const refreshPositionsBtn = document.getElementById('refresh-positions-btn');
     const refreshActivityBtn = document.getElementById('refresh-activity-btn');
     
-    if (refreshAccountBtn) refreshAccountBtn.addEventListener('click', loadAccountData);
-    if (refreshPositionsBtn) refreshPositionsBtn.addEventListener('click', loadPositions);
-    if (refreshActivityBtn) refreshActivityBtn.addEventListener('click', loadRecentActivity);
+    // ✅ Tüm refresh butonları tek dashboard data çağrısı yapar
+    if (refreshAccountBtn) refreshAccountBtn.addEventListener('click', loadAllDashboardData);
+    if (refreshPositionsBtn) refreshPositionsBtn.addEventListener('click', loadAllDashboardData);
+    if (refreshActivityBtn) refreshActivityBtn.addEventListener('click', loadAllDashboardData);
     
     // Logout buttons
     const logoutBtn = document.getElementById('logout-btn');
@@ -1388,7 +1305,7 @@ function setupEventListeners() {
         });
     });
     
-    // ✅ ADDED: Setup smart recommendations
+    // ✅ Setup smart recommendations
     setupSmartRecommendations();
 }
 
@@ -1410,25 +1327,17 @@ async function initializeDashboard() {
                 
                 try {
                     // Get Firebase ID token for backend authentication
-                    authToken = await user.getIdToken(true); // Force fresh token
+                    authToken = await user.getIdToken(true);
                     console.log('Auth token obtained');
                     
                     // Setup automatic token refresh
                     setupTokenRefresh();
                     
-                    // Load all data
-                    await Promise.all([
-                        loadUserData(),
-                        loadAccountData(),
-                        loadPositions(),
-                        loadRecentActivity()
-                    ]);
+                    // ✅ OPTIMIZED: Tek API çağrısı ile tüm veriler
+                    await loadAllDashboardData();
                     
-                    // Check API status and bot status
-                    await checkApiStatus();
+                    // Bot status ve payment info
                     await getBotStatus();
-                    
-                    // Load payment info
                     await loadPaymentAndServerInfo();
                     
                     // Setup event listeners
@@ -1441,7 +1350,7 @@ async function initializeDashboard() {
                     if (loadingScreen) loadingScreen.style.display = 'none';
                     if (dashboard) dashboard.classList.remove('hidden');
                     
-                    showNotification('Dashboard başarıyla yüklendi!', 'success');
+                    console.log('✅ Dashboard fully initialized with optimized loading');
                     
                 } catch (error) {
                     console.error('Dashboard data loading failed:', error);
@@ -1490,7 +1399,5 @@ window.closePurchaseModal = closePurchaseModal;
 window.openSupportModal = openSupportModal;
 window.closeSupportModal = closeSupportModal;
 window.copyToClipboard = copyToClipboard;
-window.loadAccountData = loadAccountData;
-window.loadPositions = loadPositions;
-window.loadRecentActivity = loadRecentActivity;
+window.loadAllDashboardData = loadAllDashboardData;  // ✅ Yeni optimized function
 window.toggleAdvancedSettings = toggleAdvancedSettings;
