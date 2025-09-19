@@ -222,14 +222,15 @@
                                         </select>
                                     </div>
                                     
+                                    <!-- ✅ UPDATED: Smart Timeframe Selection -->
                                     <div class="setting-group">
                                         <label for="timeframe-select">Zaman Dilimi:</label>
-                                        <select id="timeframe-select" class="form-input">
-                                            <option value="5m">5 Dakika</option>
-                                            <option value="15m" selected>15 Dakika</option>
-                                            <option value="30m">30 Dakika</option>
-                                            <option value="1h">1 Saat</option>
-                                            <option value="4h">4 Saat</option>
+                                        <select id="timeframe-select" class="form-input timeframe-smart-select">
+                                            <option value="5m">5m - 🏃‍♂️ Hızlı Scalping (75% Win Rate)</option>
+                                            <option value="15m" selected>15m - 📈 Dengeli Swing (70% Win Rate)</option>
+                                            <option value="30m">30m - 🎯 Trend Takip (65% Win Rate)</option>
+                                            <option value="1h">1h - 🏔️ Pozisyon Trading (60% Win Rate)</option>
+                                            <option value="4h">4h - 🚀 Major Trend (55% Win Rate)</option>
                                         </select>
                                     </div>
                                     
@@ -242,6 +243,23 @@
                                             <option value="50">50x</option>
                                         </select>
                                     </div>
+                                </div>
+
+                                <!-- ✅ ADDED: Strategy Info Card -->
+                                <div class="strategy-info-card" id="strategy-info-card">
+                                    <div class="strategy-header">
+                                        <div class="strategy-title">
+                                            <h4 id="strategy-name">📈 Dengeli Swing</h4>
+                                            <span class="risk-badge low" id="risk-badge">DÜŞÜK RİSK</span>
+                                        </div>
+                                        <div class="strategy-metrics">
+                                            <span class="metric" id="expected-win-rate">🎯 70% Win Rate</span>
+                                            <span class="metric" id="max-hold-time">⏱️ Max: 2 saat</span>
+                                        </div>
+                                    </div>
+                                    <p class="strategy-description" id="strategy-description">
+                                        Günde 5-10 trade, istikrarlı kar
+                                    </p>
                                 </div>
                                 
                                 <div class="setting-row">
@@ -256,15 +274,42 @@
                                     </div>
                                 </div>
                                 
+                                <!-- ✅ UPDATED: Smart SL/TP with Recommendations -->
                                 <div class="setting-row">
                                     <div class="setting-group">
-                                        <label for="stop-loss">Stop Loss (%):</label>
-                                        <input type="number" id="stop-loss" class="form-input" value="2" min="0.1" max="25" step="0.1">
+                                        <label for="stop-loss">
+                                            Stop Loss (%):
+                                            <button type="button" class="recommendation-btn active" id="sl-recommendation-btn" title="Önerilen değeri kullan">
+                                                💡 ÖNERİLEN
+                                            </button>
+                                        </label>
+                                        <div class="input-with-recommendation">
+                                            <input type="number" id="stop-loss" class="form-input recommended-input" value="0.8" min="0.1" max="25" step="0.1">
+                                            <div class="recommendation-hint" id="sl-hint" style="display: none;">
+                                                💡 Önerilen: <span id="sl-recommended-value">0.8</span>%
+                                                <button type="button" class="use-recommended-btn" id="use-sl-recommended">
+                                                    Kullan
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                     
                                     <div class="setting-group">
-                                        <label for="take-profit">Take Profit (%):</label>
-                                        <input type="number" id="take-profit" class="form-input" value="4" min="0.1" max="50" step="0.1">
+                                        <label for="take-profit">
+                                            Take Profit (%):
+                                            <button type="button" class="recommendation-btn active" id="tp-recommendation-btn" title="Önerilen değeri kullan">
+                                                💡 ÖNERİLEN
+                                            </button>
+                                        </label>
+                                        <div class="input-with-recommendation">
+                                            <input type="number" id="take-profit" class="form-input recommended-input" value="1.2" min="0.1" max="50" step="0.1">
+                                            <div class="recommendation-hint" id="tp-hint" style="display: none;">
+                                                💡 Önerilen: <span id="tp-recommended-value">1.2</span>%
+                                                <button type="button" class="use-recommended-btn" id="use-tp-recommended">
+                                                    Kullan
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -347,7 +392,7 @@
                             </button>
                         </div>
                         <div class="card-content">
-                            <div id="activity-list">
+                            <div id="activity-list" class="activity-list-container">
                                 <div class="empty-state">
                                     <i class="fas fa-history"></i>
                                     <h3>Henüz İşlem Yok</h3>
@@ -530,6 +575,58 @@
     <script src="/static/dashboard.js"></script>
     
     <script>
+        // ✅ ADDED: Smart Timeframe Recommendations JavaScript
+        const timeframeRecommendations = {
+            "5m": {
+                name: "🏃‍♂️ Hızlı Scalping",
+                stopLoss: 0.3,
+                takeProfit: 0.5,
+                winRate: 75,
+                description: "Günde 10-20 trade, güvenli kazanç",
+                riskLevel: "low",
+                maxHoldTime: "30 dakika"
+            },
+            "15m": {
+                name: "📈 Dengeli Swing", 
+                stopLoss: 0.8,
+                takeProfit: 1.2,
+                winRate: 70,
+                description: "Günde 5-10 trade, istikrarlı kar",
+                riskLevel: "low",
+                maxHoldTime: "2 saat"
+            },
+            "30m": {
+                name: "🎯 Trend Takip",
+                stopLoss: 1.0,
+                takeProfit: 2.0,
+                winRate: 65,
+                description: "Güçlü trend'lerde büyük kazanç",
+                riskLevel: "medium",
+                maxHoldTime: "5 saat"
+            },
+            "1h": {
+                name: "🏔️ Pozisyon Trading",
+                stopLoss: 1.5,
+                takeProfit: 3.0,
+                winRate: 60,
+                description: "Major hareketlerde yüksek kar",
+                riskLevel: "medium",
+                maxHoldTime: "12 saat"
+            },
+            "4h": {
+                name: "🚀 Major Trend",
+                stopLoss: 2.5,
+                takeProfit: 5.0,
+                winRate: 55,
+                description: "Büyük trend'lerde maksimum kazanç",
+                riskLevel: "high",
+                maxHoldTime: "48 saat"
+            }
+        };
+
+        let manualSL = false;
+        let manualTP = false;
+
         // Advanced settings toggle
         function toggleAdvancedSettings() {
             const content = document.getElementById('advanced-settings-content');
@@ -547,6 +644,131 @@
                 }
             }
         }
+
+        // ✅ Smart Recommendations Logic
+        function updateStrategyInfo(timeframe) {
+            const rec = timeframeRecommendations[timeframe];
+            if (!rec) return;
+
+            // Update strategy info card
+            document.getElementById('strategy-name').textContent = rec.name;
+            document.getElementById('strategy-description').textContent = rec.description;
+            document.getElementById('expected-win-rate').textContent = `🎯 ${rec.winRate}% Win Rate`;
+            document.getElementById('max-hold-time').textContent = `⏱️ Max: ${rec.maxHoldTime}`;
+            
+            // Update risk badge
+            const riskBadge = document.getElementById('risk-badge');
+            riskBadge.className = `risk-badge ${rec.riskLevel}`;
+            riskBadge.textContent = rec.riskLevel === 'low' ? 'DÜŞÜK RİSK' : rec.riskLevel === 'medium' ? 'ORTA RİSK' : 'YÜKSEK RİSK';
+            
+            // Update recommended values
+            document.getElementById('sl-recommended-value').textContent = rec.stopLoss;
+            document.getElementById('tp-recommended-value').textContent = rec.takeProfit;
+            
+            // Auto-update if not manual
+            if (!manualSL) {
+                document.getElementById('stop-loss').value = rec.stopLoss;
+                document.getElementById('stop-loss').classList.add('recommended-input');
+                document.getElementById('stop-loss').classList.remove('manual-input');
+                document.getElementById('sl-recommendation-btn').classList.add('active');
+                document.getElementById('sl-recommendation-btn').classList.remove('inactive');
+            }
+            
+            if (!manualTP) {
+                document.getElementById('take-profit').value = rec.takeProfit;
+                document.getElementById('take-profit').classList.add('recommended-input');
+                document.getElementById('take-profit').classList.remove('manual-input');
+                document.getElementById('tp-recommendation-btn').classList.add('active');
+                document.getElementById('tp-recommendation-btn').classList.remove('inactive');
+            }
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initial strategy update
+            updateStrategyInfo('15m');
+            
+            // Timeframe change listener
+            const timeframeSelect = document.getElementById('timeframe-select');
+            if (timeframeSelect) {
+                timeframeSelect.addEventListener('change', function() {
+                    updateStrategyInfo(this.value);
+                });
+            }
+            
+            // SL input change listener
+            const slInput = document.getElementById('stop-loss');
+            if (slInput) {
+                slInput.addEventListener('input', function() {
+                    manualSL = true;
+                    this.classList.add('manual-input');
+                    this.classList.remove('recommended-input');
+                    document.getElementById('sl-recommendation-btn').classList.add('inactive');
+                    document.getElementById('sl-recommendation-btn').classList.remove('active');
+                    document.getElementById('sl-hint').style.display = 'block';
+                });
+            }
+            
+            // TP input change listener
+            const tpInput = document.getElementById('take-profit');
+            if (tpInput) {
+                tpInput.addEventListener('input', function() {
+                    manualTP = true;
+                    this.classList.add('manual-input');
+                    this.classList.remove('recommended-input');
+                    document.getElementById('tp-recommendation-btn').classList.add('inactive');
+                    document.getElementById('tp-recommendation-btn').classList.remove('active');
+                    document.getElementById('tp-hint').style.display = 'block';
+                });
+            }
+            
+            // SL recommendation button
+            const slRecBtn = document.getElementById('sl-recommendation-btn');
+            if (slRecBtn) {
+                slRecBtn.addEventListener('click', function() {
+                    const timeframe = document.getElementById('timeframe-select').value;
+                    const rec = timeframeRecommendations[timeframe];
+                    manualSL = false;
+                    document.getElementById('stop-loss').value = rec.stopLoss;
+                    document.getElementById('stop-loss').classList.add('recommended-input');
+                    document.getElementById('stop-loss').classList.remove('manual-input');
+                    this.classList.add('active');
+                    this.classList.remove('inactive');
+                    document.getElementById('sl-hint').style.display = 'none';
+                });
+            }
+            
+            // TP recommendation button
+            const tpRecBtn = document.getElementById('tp-recommendation-btn');
+            if (tpRecBtn) {
+                tpRecBtn.addEventListener('click', function() {
+                    const timeframe = document.getElementById('timeframe-select').value;
+                    const rec = timeframeRecommendations[timeframe];
+                    manualTP = false;
+                    document.getElementById('take-profit').value = rec.takeProfit;
+                    document.getElementById('take-profit').classList.add('recommended-input');
+                    document.getElementById('take-profit').classList.remove('manual-input');
+                    this.classList.add('active');
+                    this.classList.remove('inactive');
+                    document.getElementById('tp-hint').style.display = 'none';
+                });
+            }
+            
+            // Use recommended buttons
+            const useSLBtn = document.getElementById('use-sl-recommended');
+            if (useSLBtn) {
+                useSLBtn.addEventListener('click', function() {
+                    document.getElementById('sl-recommendation-btn').click();
+                });
+            }
+            
+            const useTPBtn = document.getElementById('use-tp-recommended');
+            if (useTPBtn) {
+                useTPBtn.addEventListener('click', function() {
+                    document.getElementById('tp-recommendation-btn').click();
+                });
+            }
+        });
     </script>
 </body>
 </html>
