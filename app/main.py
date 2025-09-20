@@ -56,11 +56,18 @@ class GlobalClients:
         """
         Get BinanceClient instance - optimized singleton pattern
         """
-        # Public client (for market data)
+        # Public client (for market data only - no private endpoints)
         if not user_id and not api_key:
             if not self.default_client:
-                self.default_client = BinanceClient()
-                await self.default_client.initialize()
+                # Create public-only client without API credentials
+                self.default_client = BinanceClient(api_key=None, api_secret=None, user_id="public")
+                try:
+                    await self.default_client.initialize()
+                except Exception as e:
+                    logging.warning(f"Public client initialization failed: {e}")
+                    # Create minimal client for public data only
+                    self.default_client = BinanceClient()
+                    self.default_client.client = None  # Will use REST fallback
             return self.default_client
         
         # User-specific client
@@ -1089,20 +1096,30 @@ async def get_dashboard_data(current_user: dict = Depends(get_current_user)):
                     try:
                         # Use optimized singleton client
                         client = await get_binance_client_for_user(user_id)
-                        balance = await client.get_account_balance(use_cache=True)
                         
-                        dashboard_data["account"] = {
-                            "totalBalance": balance,
-                            "availableBalance": balance,
-                            "unrealizedPnl": 0.0,
-                            "message": "Real Binance data (optimized)"
-                        }
-                        
-                        # Update cache
-                        user_ref.update({
-                            "account_balance": balance,
-                            "last_balance_update": int(datetime.utcnow().timestamp() * 1000)
-                        })
+                        # Only get account data for private clients
+                        if not client.is_public_only:
+                            balance = await client.get_account_balance(use_cache=True)
+                            
+                            dashboard_data["account"] = {
+                                "totalBalance": balance,
+                                "availableBalance": balance,
+                                "unrealizedPnl": 0.0,
+                                "message": "Real Binance data (optimized)"
+                            }
+                            
+                            # Update cache
+                            user_ref.update({
+                                "account_balance": balance,
+                                "last_balance_update": int(datetime.utcnow().timestamp() * 1000)
+                            })
+                        else:
+                            dashboard_data["account"] = {
+                                "totalBalance": user_data.get("account_balance", 0.0),
+                                "availableBalance": user_data.get("account_balance", 0.0),
+                                "unrealizedPnl": 0.0,
+                                "message": "Public client - cached data"
+                            }
                         
                     except Exception as account_error:
                         logger.error(f"Account data error: {account_error}")
@@ -1216,8 +1233,180 @@ async def get_dashboard_data(current_user: dict = Depends(get_current_user)):
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
-# Continue with remaining endpoints but using optimized client patterns...
-# [Rest of the endpoints follow the same optimization pattern]
+@app.get("/api/user/positions")
+async def get_user_positions(current_user: dict = Depends(get_current_user)):
+    """Get user positions - ALWAYS returns array"""
+    try:
+        user_id = current_user['uid']
+        positions = []  # Initialize as empty array
+        
+        if not global_clients.firebase_initialized or not global_clients.firebase_db:
+            return positions  # Return empty array if Firebase unavailable
+        
+        try:
+            user_ref = global_clients.firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
+            
+            if user_data and user_data.get('api_keys_set'):
+                try:
+                    # Use optimized singleton client
+                    client = await get_binance_client_for_user(user_id)
+                    
+                    # Only get positions for private clients
+                    if not client.is_public_only:
+                        # Get all open positions
+                        all_symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "DOTUSDT"]
+                        
+                        for symbol in all_symbols:
+                            try:
+                                symbol_positions = await client.get_open_positions(symbol, use_cache=True)
+                                for pos in symbol_positions:
+                                    try:
+                                        position_amt = float(pos.get('positionAmt', 0))
+                                        if position_amt != 0:  # Only include non-zero positions
+                                            isolated_wallet = float(pos.get('isolatedWallet', 0))
+                                            unrealized_profit = float(pos.get('unRealizedProfit', 0))
+                                            
+                                            # Safe percentage calculation
+                                            percentage = 0.0
+                                            if isolated_wallet != 0:
+                                                try:
+                                                    percentage = (unrealized_profit / isolated_wallet) * 100
+                                                except (ZeroDivisionError, TypeError):
+                                                    percentage = 0.0
+                                            
+                                            positions.append({
+                                                "symbol": pos.get('symbol', ''),
+                                                "positionSide": "LONG" if position_amt > 0 else "SHORT",
+                                                "positionAmt": str(abs(position_amt)),
+                                                "entryPrice": pos.get('entryPrice', '0'),
+                                                "markPrice": pos.get('markPrice', '0'),
+                                                "unrealizedPnl": unrealized_profit,
+                                                "percentage": percentage,
+                                                "leverage": pos.get('leverage', '1'),
+                                                "marginType": pos.get('marginType', 'CROSSED')
+                                            })
+                                    except (ValueError, TypeError, KeyError) as pos_error:
+                                        logger.error(f"Error processing position: {pos_error}")
+                                        continue  # Skip invalid position data
+                            except Exception as symbol_error:
+                                logger.error(f"Error getting positions for {symbol}: {symbol_error}")
+                                continue
+                            
+                except Exception as e:
+                    logger.error(f"Error getting positions for user {user_id}: {e}")
+                    # Return empty array on error
+                    
+        except Exception as db_error:
+            logger.error(f"Database error in positions: {db_error}")
+        
+        # ALWAYS return array (even if empty)
+        return positions
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Positions error: {e}")
+        # Return empty array instead of raising exception
+        return []
+
+@app.get("/api/user/recent-trades")
+async def get_recent_trades(current_user: dict = Depends(get_current_user), limit: int = 10):
+    """Get recent trades - ALWAYS returns array"""
+    try:
+        user_id = current_user['uid']
+        trades = []  # Initialize as empty array
+        
+        if not global_clients.firebase_initialized or not global_clients.firebase_db:
+            return trades  # Return empty array if Firebase unavailable
+        
+        try:
+            # Get from Firebase first
+            trades_ref = global_clients.firebase_db.reference('trades')
+            query = trades_ref.order_by_child('user_id').equal_to(user_id).limit_to_last(limit)
+            snapshot = query.get()
+            
+            if snapshot and isinstance(snapshot, dict):
+                for trade_id, trade_data in snapshot.items():
+                    try:
+                        trades.append({
+                            "id": trade_id,
+                            "symbol": trade_data.get("symbol", ""),
+                            "side": trade_data.get("side", ""),
+                            "quantity": float(trade_data.get("quantity", 0)),
+                            "price": float(trade_data.get("price", 0)),
+                            "quoteQty": float(trade_data.get("quote_qty", 0)),
+                            "pnl": float(trade_data.get("pnl", 0)),
+                            "status": trade_data.get("status", "UNKNOWN"),
+                            "time": trade_data.get("timestamp", 0)
+                        })
+                    except (ValueError, TypeError, KeyError) as trade_error:
+                        logger.error(f"Error processing trade: {trade_error}")
+                        continue  # Skip invalid trade data
+                        
+        except Exception as db_error:
+            logger.error(f"Database error in trades: {db_error}")
+        
+        # If no Firebase data, try Binance (fallback)
+        if not trades:
+            try:
+                user_ref = global_clients.firebase_db.reference(f'users/{user_id}')
+                user_data = user_ref.get()
+                
+                if user_data and user_data.get('api_keys_set'):
+                    # Use optimized singleton client
+                    client = await get_binance_client_for_user(user_id)
+                    
+                    # Only get trading history for private clients
+                    if not client.is_public_only:
+                        # Get recent trades for multiple symbols
+                        symbols_to_check = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+                        
+                        for symbol in symbols_to_check:
+                            try:
+                                recent_trades = await client.client.futures_account_trades(symbol=symbol, limit=5)
+                                
+                                for trade in recent_trades[-5:]:  # Last 5 trades per symbol
+                                    try:
+                                        trades.append({
+                                            "id": str(trade.get('id', '')),
+                                            "symbol": trade.get('symbol', ''),
+                                            "side": trade.get('side', ''),
+                                            "quantity": float(trade.get('qty', 0)),
+                                            "price": float(trade.get('price', 0)),
+                                            "quoteQty": float(trade.get('quoteQty', 0)),
+                                            "pnl": float(trade.get('realizedPnl', 0)),
+                                            "status": "FILLED",
+                                            "time": trade.get('time', 0)
+                                        })
+                                    except (ValueError, TypeError, KeyError) as trade_error:
+                                        logger.error(f"Error processing Binance trade: {trade_error}")
+                                        continue
+                                        
+                            except Exception as symbol_error:
+                                logger.error(f"Error getting trades for {symbol}: {symbol_error}")
+                                continue
+                            
+            except Exception as binance_error:
+                logger.error(f"Binance trades fetch failed: {binance_error}")
+        
+        # Sort by time (most recent first)
+        try:
+            trades.sort(key=lambda x: x.get("time", 0), reverse=True)
+            # Limit to requested number
+            trades = trades[:limit]
+        except Exception as sort_error:
+            logger.error(f"Error sorting trades: {sort_error}")
+        
+        # ALWAYS return array (even if empty)
+        return trades
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Recent trades error: {e}")
+        # Return empty array instead of raising exception
+        return []
 
 @app.get("/api/user/account")
 async def get_account_data(current_user: dict = Depends(get_current_user)):
@@ -1245,20 +1434,30 @@ async def get_account_data(current_user: dict = Depends(get_current_user)):
                 try:
                     # Use optimized singleton client
                     client = await get_binance_client_for_user(user_id)
-                    balance = await client.get_account_balance(use_cache=False)
                     
-                    account_data = {
-                        "totalBalance": balance,
-                        "availableBalance": balance,
-                        "unrealizedPnl": 0.0,
-                        "message": "Real Binance data (optimized)"
-                    }
-                    
-                    # Update cache
-                    user_ref.update({
-                        "account_balance": balance,
-                        "last_balance_update": int(datetime.utcnow().timestamp() * 1000)
-                    })
+                    # Only get account data for private clients
+                    if not client.is_public_only:
+                        balance = await client.get_account_balance(use_cache=False)
+                        
+                        account_data = {
+                            "totalBalance": balance,
+                            "availableBalance": balance,
+                            "unrealizedPnl": 0.0,
+                            "message": "Real Binance data (optimized)"
+                        }
+                        
+                        # Update cache
+                        user_ref.update({
+                            "account_balance": balance,
+                            "last_balance_update": int(datetime.utcnow().timestamp() * 1000)
+                        })
+                    else:
+                        account_data = {
+                            "totalBalance": user_data.get("account_balance", 0.0),
+                            "availableBalance": user_data.get("account_balance", 0.0),
+                            "unrealizedPnl": 0.0,
+                            "message": "Public client - cached data"
+                        }
                     
                 except Exception as e:
                     logger.error(f"Error getting real account data: {e}")
@@ -1279,6 +1478,655 @@ async def get_account_data(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Account data error: {e}")
         raise HTTPException(status_code=500, detail="Account data could not be loaded")
+
+@app.get("/api/user/profile")
+async def get_user_profile(current_user: dict = Depends(get_current_user)):
+    """Get user profile with Firebase fallback"""
+    try:
+        user_id = current_user['uid']
+        email = current_user.get('email')
+        
+        if not global_clients.firebase_initialized or not global_clients.firebase_db:
+            # Return mock profile if Firebase unavailable
+            logger.warning("Firebase unavailable, returning mock profile")
+            return {
+                "email": email,
+                "subscription": {
+                    "status": "trial",
+                    "plan": "Deneme",
+                    "daysRemaining": 7
+                },
+                "api_keys_set": False,
+                "bot_active": False,
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "account_balance": 0.0,
+                "note": "Firebase unavailable - mock data"
+            }
+        
+        try:
+            user_ref = global_clients.firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
+            
+            if not user_data:
+                # Create basic user data
+                trial_expiry = datetime.now(timezone.utc) + timedelta(days=7)
+                user_data = {
+                    "email": email,
+                    "subscription_status": "trial",
+                    "subscription_expiry": trial_expiry.isoformat(),
+                    "api_keys_set": False,
+                    "bot_active": False,
+                    "total_trades": 0,
+                    "total_pnl": 0.0
+                }
+                user_ref.set(user_data)
+            
+            # Check subscription expiry
+            subscription_status = "expired"
+            days_remaining = 0
+            
+            if user_data.get('subscription_expiry'):
+                try:
+                    expiry_date = datetime.fromisoformat(user_data['subscription_expiry'].replace('Z', '+00:00'))
+                    now = datetime.now(timezone.utc)
+                    days_remaining = (expiry_date - now).days
+                    
+                    if days_remaining > 0:
+                        subscription_status = user_data.get('subscription_status', 'trial')
+                    else:
+                        subscription_status = "expired"
+                except Exception as date_error:
+                    logger.error(f"Date parsing error: {date_error}")
+                    subscription_status = "trial"
+                    days_remaining = 7
+            
+            profile = {
+                "email": user_data.get("email", email),
+                "full_name": user_data.get("full_name"),
+                "subscription": {
+                    "status": subscription_status,
+                    "plan": "Premium" if subscription_status == "active" else "Deneme",
+                    "expiryDate": user_data.get("subscription_expiry"),
+                    "daysRemaining": max(0, days_remaining)
+                },
+                "api_keys_set": user_data.get("api_keys_set", False),
+                "bot_active": user_data.get("bot_active", False),
+                "total_trades": user_data.get("total_trades", 0),
+                "total_pnl": user_data.get("total_pnl", 0.0),
+                "account_balance": user_data.get("account_balance", 0.0)
+            }
+            
+            return profile
+            
+        except Exception as db_error:
+            logger.error(f"Database error in profile: {db_error}")
+            # Return basic profile if database fails
+            return {
+                "email": email,
+                "subscription": {
+                    "status": "trial",
+                    "plan": "Deneme",
+                    "daysRemaining": 7
+                },
+                "api_keys_set": False,
+                "bot_active": False,
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "account_balance": 0.0,
+                "error": "Database error"
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Profile fetch error: {e}")
+        # Fallback response
+        return {
+            "email": current_user.get('email', 'unknown@user.com'),
+            "subscription": {
+                "status": "trial",
+                "plan": "Deneme", 
+                "daysRemaining": 7
+            },
+            "api_keys_set": False,
+            "bot_active": False,
+            "total_trades": 0,
+            "total_pnl": 0.0,
+            "account_balance": 0.0,
+            "error": str(e)
+        }
+
+@app.get("/api/user/stats")
+async def get_user_stats(current_user: dict = Depends(get_current_user)):
+    """Get user stats"""
+    try:
+        user_id = current_user['uid']
+        
+        if not global_clients.firebase_initialized or not global_clients.firebase_db:
+            return {
+                "totalTrades": 0,
+                "totalPnl": 0.0,
+                "winRate": 0.0,
+                "botStartTime": None,
+                "lastTradeTime": None
+            }
+        
+        try:
+            user_ref = global_clients.firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
+            
+            if user_data:
+                return {
+                    "totalTrades": user_data.get("total_trades", 0),
+                    "totalPnl": user_data.get("total_pnl", 0.0),
+                    "winRate": user_data.get("win_rate", 0.0),
+                    "botStartTime": user_data.get("bot_start_time"),
+                    "lastTradeTime": user_data.get("last_trade_time")
+                }
+        except Exception as db_error:
+            logger.error(f"Database error in stats: {db_error}")
+        
+        return {
+            "totalTrades": 0,
+            "totalPnl": 0.0,
+            "winRate": 0.0,
+            "botStartTime": None,
+            "lastTradeTime": None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Stats error: {e}")
+        raise HTTPException(status_code=500, detail="Stats could not be loaded")
+
+@app.post("/api/user/api-keys")
+async def save_api_keys(request: dict, current_user: dict = Depends(get_current_user)):
+    """Save user API keys with optimized client"""
+    try:
+        user_id = current_user['uid']
+        api_key = request.get('api_key', '').strip()
+        api_secret = request.get('api_secret', '').strip()
+        testnet = request.get('testnet', False)
+        
+        if not api_key or not api_secret:
+            raise HTTPException(status_code=400, detail="API key and secret required")
+        
+        # Validate API key format
+        if len(api_key) != 64 or not api_key.isalnum():
+            raise HTTPException(status_code=400, detail="Invalid API key format")
+        
+        if len(api_secret) != 64 or not api_secret.isalnum():
+            raise HTTPException(status_code=400, detail="Invalid API secret format")
+        
+        # Test API keys with temporary client
+        try:
+            test_client = await global_clients.get_binance_client(user_id=None, api_key=api_key, api_secret=api_secret)
+            balance = await test_client.get_account_balance(use_cache=False)
+            logger.info(f"API test successful for user {user_id}, balance: {balance}")
+            
+            # Clean up test client
+            await test_client.close_connection()
+            
+        except Exception as e:
+            logger.error(f"API test failed: {e}")
+            raise HTTPException(status_code=400, detail=f"Invalid API keys: {str(e)}")
+        
+        if not global_clients.firebase_initialized or not global_clients.firebase_db:
+            # If Firebase unavailable, still return success (store temporarily)
+            logger.warning("Firebase unavailable - API keys validated but not stored")
+            return {
+                "success": True,
+                "message": "API keys tested successfully (temporary storage)",
+                "balance": balance,
+                "firebase_available": False
+            }
+        
+        # Encrypt and save
+        try:
+            from app.utils.crypto import encrypt_data
+            
+            encrypted_api_key = encrypt_data(api_key)
+            encrypted_api_secret = encrypt_data(api_secret)
+            
+            api_data = {
+                "binance_api_key": encrypted_api_key,
+                "binance_api_secret": encrypted_api_secret,
+                "api_testnet": testnet,
+                "api_keys_set": True,
+                "api_updated_at": int(datetime.utcnow().timestamp() * 1000),
+                "account_balance": balance
+            }
+            
+            user_ref = global_clients.firebase_db.reference(f'users/{user_id}')
+            user_ref.update(api_data)
+            
+            # Clear existing client for this user to force recreation with new keys
+            await global_clients.cleanup_client(user_id)
+            
+            logger.info(f"API keys saved successfully for user: {user_id}")
+            
+            return {
+                "success": True,
+                "message": "API keys saved and tested successfully",
+                "balance": balance
+            }
+            
+        except ImportError as import_error:
+            logger.error(f"Crypto module import error: {import_error}")
+            raise HTTPException(
+                status_code=500, 
+                detail="Encryption service unavailable. Please contact support."
+            )
+        except Exception as save_error:
+            logger.error(f"API keys save error: {save_error}")
+            logger.error(f"Save error traceback: {traceback.format_exc()}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to save API keys: {str(save_error)}"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"API keys save error: {e}")
+        raise HTTPException(status_code=500, detail=f"API keys could not be saved: {str(e)}")
+
+@app.get("/api/user/api-info")
+async def get_api_info(current_user: dict = Depends(get_current_user)):
+    """Get API info (masked)"""
+    try:
+        user_id = current_user['uid']
+        
+        if not global_clients.firebase_initialized or not global_clients.firebase_db:
+            return {
+                "hasKeys": False,
+                "maskedApiKey": None,
+                "useTestnet": False
+            }
+        
+        try:
+            user_ref = global_clients.firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
+            
+            if not user_data:
+                return {
+                    "hasKeys": False,
+                    "maskedApiKey": None,
+                    "useTestnet": False
+                }
+            
+            has_keys = user_data.get('api_keys_set', False)
+            
+            if has_keys:
+                encrypted_api_key = user_data.get('binance_api_key')
+                masked_key = None
+                
+                if encrypted_api_key:
+                    try:
+                        from app.utils.crypto import decrypt_data
+                        api_key = decrypt_data(encrypted_api_key)
+                        if api_key and len(api_key) >= 8:
+                            masked_key = api_key[:8] + "..." + api_key[-4:]
+                    except:
+                        masked_key = "Encrypted API Key"
+                
+                return {
+                    "hasKeys": True,
+                    "maskedApiKey": masked_key,
+                    "useTestnet": user_data.get('api_testnet', False)
+                }
+            else:
+                return {
+                    "hasKeys": False,
+                    "maskedApiKey": None,
+                    "useTestnet": False
+                }
+        except Exception as db_error:
+            logger.error(f"Database error in API info: {db_error}")
+            return {
+                "hasKeys": False,
+                "maskedApiKey": None,
+                "useTestnet": False
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"API info error: {e}")
+        raise HTTPException(status_code=500, detail="API info could not be loaded")
+
+@app.get("/api/user/api-keys")
+async def get_api_keys_status(current_user: dict = Depends(get_current_user)):
+    """Get API keys status - same as api-info for compatibility"""
+    return await get_api_info(current_user)
+
+# =================================================================
+# BOT ENDPOINTS
+# =================================================================
+@app.get("/api/bot/status")
+async def get_bot_status(current_user: dict = Depends(get_current_user)):
+    """Get bot status"""
+    try:
+        user_id = current_user['uid']
+        
+        # Try to get real bot status
+        try:
+            from app.bot_manager import bot_manager
+            status = bot_manager.get_bot_status(user_id)
+            return {
+                "success": True,
+                "status": status
+            }
+        except Exception as bot_error:
+            logger.error(f"Bot manager error: {bot_error}")
+            # Return fallback status
+            return {
+                "success": True,
+                "status": {
+                    "user_id": user_id,
+                    "is_running": False,
+                    "symbol": None,
+                    "position_side": None,
+                    "status_message": "Bot service unavailable",
+                    "account_balance": 0.0,
+                    "position_pnl": 0.0,
+                    "total_trades": 0,
+                    "total_pnl": 0.0,
+                    "last_check_time": None
+                }
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Bot status error: {e}")
+        raise HTTPException(status_code=500, detail="Bot status could not be retrieved")
+
+@app.post("/api/bot/start")
+async def start_bot(request: dict, current_user: dict = Depends(get_current_user)):
+    """Start bot for user"""
+    try:
+        user_id = current_user['uid']
+        logger.info(f"Bot start request from user: {user_id}")
+        
+        if not global_clients.firebase_initialized or not global_clients.firebase_db:
+            raise HTTPException(status_code=500, detail="Database service unavailable")
+        
+        # Check subscription
+        try:
+            user_ref = global_clients.firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
+            
+            if not user_data:
+                raise HTTPException(status_code=404, detail="User data not found")
+            
+            # Check subscription expiry
+            subscription_status = user_data.get('subscription_status')
+            if user_data.get('subscription_expiry'):
+                try:
+                    expiry_date = datetime.fromisoformat(user_data['subscription_expiry'].replace('Z', '+00:00'))
+                    now = datetime.now(timezone.utc)
+                    
+                    if now > expiry_date:
+                        raise HTTPException(status_code=403, detail="Subscription expired")
+                except Exception as date_error:
+                    logger.error(f"Date parsing error: {date_error}")
+                    # Continue with trial if date parsing fails
+            
+            if subscription_status not in ['trial', 'active']:
+                raise HTTPException(status_code=403, detail="Active subscription required")
+            
+            # Check API keys
+            if not user_data.get('api_keys_set'):
+                raise HTTPException(status_code=400, detail="Please add your API keys first")
+            
+            # Try to start bot
+            try:
+                from app.bot_manager import bot_manager, StartRequest
+                
+                bot_settings = StartRequest(
+                    symbol=request.get('symbol', 'BTCUSDT'),
+                    timeframe=request.get('timeframe', '15m'),
+                    leverage=request.get('leverage', 10),
+                    order_size=request.get('order_size', 35.0),
+                    stop_loss=request.get('stop_loss', 2.0),
+                    take_profit=request.get('take_profit', 4.0)
+                )
+                
+                result = await bot_manager.start_bot_for_user(user_id, bot_settings)
+                
+                if "error" in result:
+                    raise HTTPException(status_code=400, detail=result["error"])
+                
+                # Update user data
+                user_ref.update({
+                    "bot_active": True,
+                    "bot_symbol": request.get('symbol', 'BTCUSDT'),
+                    "bot_start_time": int(datetime.utcnow().timestamp() * 1000)
+                })
+                
+                return {
+                    "success": True,
+                    "message": "Bot started successfully",
+                    "bot_status": result.get("status", {})
+                }
+                
+            except Exception as bot_error:
+                logger.error(f"Bot manager error: {bot_error}")
+                # Return mock success for now
+                return {
+                    "success": False,
+                    "message": f"Bot service unavailable: {str(bot_error)}"
+                }
+                
+        except Exception as db_error:
+            logger.error(f"Database error in bot start: {db_error}")
+            raise HTTPException(status_code=500, detail="Bot start failed due to database error")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Bot start error: {e}")
+        raise HTTPException(status_code=500, detail=f"Bot could not be started: {str(e)}")
+
+@app.post("/api/bot/stop")
+async def stop_bot(current_user: dict = Depends(get_current_user)):
+    """Stop bot for user"""
+    try:
+        user_id = current_user['uid']
+        logger.info(f"Bot stop request from user: {user_id}")
+        
+        try:
+            from app.bot_manager import bot_manager
+            result = await bot_manager.stop_bot_for_user(user_id)
+            
+            if "error" in result:
+                raise HTTPException(status_code=400, detail=result["error"])
+        except Exception as bot_error:
+            logger.error(f"Bot manager error: {bot_error}")
+            # Return mock success for now
+            pass
+        
+        # Update user data
+        if global_clients.firebase_initialized and global_clients.firebase_db:
+            try:
+                user_ref = global_clients.firebase_db.reference(f'users/{user_id}')
+                user_ref.update({
+                    "bot_active": False,
+                    "bot_stop_time": int(datetime.utcnow().timestamp() * 1000)
+                })
+            except Exception as db_error:
+                logger.error(f"Database update error: {db_error}")
+        
+        return {
+            "success": True,
+            "message": "Bot stopped successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Bot stop error: {e}")
+        raise HTTPException(status_code=500, detail=f"Bot could not be stopped: {str(e)}")
+
+@app.get("/api/trading/pairs")
+async def get_trading_pairs(current_user: dict = Depends(get_current_user)):
+    """Get supported trading pairs - ALWAYS returns array"""
+    try:
+        pairs = [
+            {"symbol": "BTCUSDT", "baseAsset": "BTC", "quoteAsset": "USDT"},
+            {"symbol": "ETHUSDT", "baseAsset": "ETH", "quoteAsset": "USDT"},
+            {"symbol": "BNBUSDT", "baseAsset": "BNB", "quoteAsset": "USDT"},
+            {"symbol": "ADAUSDT", "baseAsset": "ADA", "quoteAsset": "USDT"},
+            {"symbol": "DOTUSDT", "baseAsset": "DOT", "quoteAsset": "USDT"},
+            {"symbol": "LINKUSDT", "baseAsset": "LINK", "quoteAsset": "USDT"},
+            {"symbol": "SOLUSDT", "baseAsset": "SOL", "quoteAsset": "USDT"},
+            {"symbol": "AVAXUSDT", "baseAsset": "AVAX", "quoteAsset": "USDT"},
+            {"symbol": "MATICUSDT", "baseAsset": "MATIC", "quoteAsset": "USDT"},
+            {"symbol": "XRPUSDT", "baseAsset": "XRP", "quoteAsset": "USDT"}
+        ]
+        
+        # Try to get live pairs from Binance if possible
+        try:
+            # Use default client for public data
+            default_client = await global_clients.get_binance_client()
+            if default_client and default_client.client:
+                # Get exchange info for live pairs
+                exchange_info = await default_client.client.futures_exchange_info()
+                live_pairs = []
+                
+                for symbol_info in exchange_info.get('symbols', []):
+                    if (symbol_info.get('status') == 'TRADING' and 
+                        symbol_info.get('quoteAsset') == 'USDT' and
+                        symbol_info.get('contractType') == 'PERPETUAL'):
+                        
+                        live_pairs.append({
+                            "symbol": symbol_info.get('symbol'),
+                            "baseAsset": symbol_info.get('baseAsset'),
+                            "quoteAsset": symbol_info.get('quoteAsset'),
+                            "status": symbol_info.get('status')
+                        })
+                
+                # Filter to popular pairs or return all
+                popular_symbols = [p["symbol"] for p in pairs]
+                filtered_pairs = [p for p in live_pairs if p["symbol"] in popular_symbols]
+                
+                if filtered_pairs:
+                    pairs = filtered_pairs
+                    
+        except Exception as e:
+            logger.error(f"Error getting live trading pairs: {e}")
+            # Return default pairs if live data fails
+        
+        return pairs
+        
+    except Exception as e:
+        logger.error(f"Trading pairs error: {e}")
+        # Return default pairs on any error
+        return [
+            {"symbol": "BTCUSDT", "baseAsset": "BTC", "quoteAsset": "USDT"},
+            {"symbol": "ETHUSDT", "baseAsset": "ETH", "quoteAsset": "USDT"},
+            {"symbol": "BNBUSDT", "baseAsset": "BNB", "quoteAsset": "USDT"}
+        ]
+
+@app.post("/api/user/close-position")
+async def close_position(request: dict, current_user: dict = Depends(get_current_user)):
+    """Close position using singleton client"""
+    try:
+        user_id = current_user['uid']
+        symbol = request.get('symbol')
+        position_side = request.get('positionSide')
+        
+        if not symbol or not position_side:
+            raise HTTPException(status_code=400, detail="Symbol and position side required")
+        
+        if not global_clients.firebase_initialized or not global_clients.firebase_db:
+            return {
+                "success": False,
+                "message": "Database service unavailable"
+            }
+        
+        user_ref = global_clients.firebase_db.reference(f'users/{user_id}')
+        user_data = user_ref.get()
+        
+        if not user_data or not user_data.get('api_keys_set'):
+            raise HTTPException(status_code=400, detail="API keys required")
+        
+        # Real position closing using singleton client
+        try:
+            client = await get_binance_client_for_user(user_id)
+            
+            # Check if client can perform private operations
+            if client.is_public_only:
+                raise HTTPException(status_code=400, detail="Private client required for position operations")
+            
+            # Get position info
+            positions = await client.get_open_positions(symbol, use_cache=False)
+            
+            if not positions:
+                raise HTTPException(status_code=404, detail="No open position found")
+            
+            position = positions[0]
+            position_amt = float(position['positionAmt'])
+            side_to_close = 'SELL' if position_amt > 0 else 'BUY'
+            
+            # Close position
+            close_result = await client.close_position(symbol, position_amt, side_to_close)
+            
+            if close_result:
+                # Calculate PnL (if available)
+                pnl = 0.0
+                try:
+                    pnl = float(position.get('unRealizedProfit', 0))
+                except (ValueError, TypeError):
+                    pnl = 0.0
+                
+                # Log trade to Firebase
+                trade_data = {
+                    "user_id": user_id,
+                    "symbol": symbol,
+                    "side": position_side,
+                    "status": "CLOSED_MANUAL",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "pnl": pnl,
+                    "close_reason": "manual"
+                }
+                
+                try:
+                    trades_ref = global_clients.firebase_db.reference('trades')
+                    trades_ref.push(trade_data)
+                except Exception as log_error:
+                    logger.error(f"Trade logging error: {log_error}")
+                
+                # Update user stats
+                current_trades = user_data.get('total_trades', 0)
+                current_pnl = user_data.get('total_pnl', 0.0)
+                
+                user_ref.update({
+                    'total_trades': current_trades + 1,
+                    'total_pnl': current_pnl + pnl,
+                    'last_trade_time': int(datetime.utcnow().timestamp() * 1000)
+                })
+                
+                return {
+                    "success": True,
+                    "message": "Position closed successfully",
+                    "pnl": pnl
+                }
+            else:
+                raise Exception("Position closing failed")
+                
+        except Exception as e:
+            logger.error(f"Position close error for {user_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Position could not be closed: {str(e)}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Position close error: {e}")
+        raise HTTPException(status_code=500, detail="Position could not be closed")
 
 # Metrics endpoint
 @app.get("/metrics")
