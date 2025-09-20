@@ -288,7 +288,7 @@ class BinanceClient:
             
             # Cache kontrolü (5 saniye cache)
             if use_cache and cache_key in self._last_position_check:
-                if current_time - self._last_position_check[cache_key] < 5:
+                if current_time - self._last_position_check[cache_key] < 40:
                     return self._cached_positions.get(cache_key, [])
             
             await self.rate_limiter.wait_if_needed('position', self.user_id)
