@@ -11,7 +11,436 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     
-    <link rel="stylesheet" href="/static/dashboard.css">
+    <!-- CSS OTOMATIK YÜKLEME SCRIPT - EN ÖNEMLİ KISI -->
+    <script>
+        // CSS'i hemen yükle - DOM yüklenmeden önce
+        (function() {
+            console.log('🔄 CSS loader starting...');
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.type = 'text/css';
+            link.href = '/static/dashboard.css?v=' + Date.now();
+            link.onload = function() {
+                console.log('✅ Dashboard CSS loaded successfully');
+                document.body.classList.add('css-loaded');
+            };
+            link.onerror = function() {
+                console.error('❌ Dashboard CSS failed to load');
+                // Fallback - try without cache busting
+                const fallbackLink = document.createElement('link');
+                fallbackLink.rel = 'stylesheet';
+                fallbackLink.type = 'text/css';
+                fallbackLink.href = '/static/dashboard.css';
+                document.head.appendChild(fallbackLink);
+            };
+            document.head.appendChild(link);
+        })();
+    </script>
+    
+    <!-- Critical CSS - Hemen çalışması için -->
+    <style>
+        /* Critical CSS - Anında yükleme */
+        body { 
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .dashboard { 
+            min-height: 100vh;
+            background: #0f172a;
+        }
+        
+        .dashboard.hidden { 
+            display: none; 
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 1rem;
+        }
+        
+        /* Loading Screen */
+        .loading-screen { 
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #0f172a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.3s ease;
+        }
+        
+        .loading-content {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+        }
+        
+        .loading-logo {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            font-size: 1.75rem;
+            font-weight: 800;
+            color: #f8fafc;
+            margin-bottom: 1rem;
+        }
+        
+        .loading-logo i {
+            color: #2563eb;
+            font-size: 2rem;
+        }
+        
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #334155;
+            border-top: 3px solid #2563eb;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .loading-content p {
+            color: #cbd5e1;
+            font-size: 1rem;
+        }
+        
+        /* Dashboard Header */
+        .dashboard-header {
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            padding: 1rem 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: none;
+        }
+        
+        /* Mobile Header */
+        .mobile-header {
+            display: block;
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            padding: 1rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .mobile-header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: #f8fafc;
+            text-decoration: none;
+        }
+        
+        .logo i {
+            color: #2563eb;
+            font-size: 1.75rem;
+        }
+        
+        .hamburger-menu {
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #f8fafc;
+            padding: 0.5rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 1.25rem;
+            transition: all 0.3s ease;
+        }
+        
+        .hamburger-menu:hover {
+            background: #334155;
+        }
+        
+        /* Main Content */
+        .main-content {
+            padding: 1.5rem 0 5rem 0;
+            min-height: calc(100vh - 80px);
+        }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+        }
+        
+        /* Cards */
+        .card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.2);
+        }
+        
+        .card:hover {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+            transform: translateY(-1px);
+        }
+        
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem 1.5rem 0 1.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .card-header h2 {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #f8fafc;
+            margin: 0;
+        }
+        
+        .card-header h2 i {
+            color: #2563eb;
+            font-size: 1.5rem;
+        }
+        
+        .card-content {
+            padding: 0 1.5rem 1.5rem 1.5rem;
+        }
+        
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.875rem 1.5rem;
+            border: none;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            user-select: none;
+            min-height: 48px;
+            font-family: inherit;
+            line-height: 1;
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: white;
+            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #16a34a, #15803d);
+            color: white;
+            box-shadow: 0 4px 14px rgba(22, 163, 74, 0.4);
+        }
+        
+        .btn-success:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(22, 163, 74, 0.5);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+            color: white;
+            box-shadow: 0 4px 14px rgba(220, 38, 38, 0.4);
+        }
+        
+        .btn-danger:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(220, 38, 38, 0.5);
+        }
+        
+        .btn-outline {
+            background: transparent;
+            border: 1px solid #334155;
+            color: #f8fafc;
+        }
+        
+        .btn-outline:hover:not(:disabled) {
+            background: #1e293b;
+            border-color: #475569;
+        }
+        
+        .btn-sm {
+            padding: 0.5rem 0.75rem;
+            font-size: 0.875rem;
+            min-height: 36px;
+        }
+        
+        /* Account Stats */
+        .account-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 1rem;
+            border: 1px solid #334155;
+            border-radius: 0.5rem;
+            background: #1e293b;
+            transition: all 0.3s ease;
+        }
+        
+        .stat-item:hover {
+            background: #334155;
+            transform: translateY(-1px);
+        }
+        
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            color: white;
+            flex-shrink: 0;
+        }
+        
+        .stat-icon.primary {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+        }
+        
+        .stat-icon.success {
+            background: linear-gradient(135deg, #16a34a, #15803d);
+        }
+        
+        .stat-icon.warning {
+            background: linear-gradient(135deg, #f59e0b, #ea580c);
+        }
+        
+        .stat-icon.info {
+            background: linear-gradient(135deg, #0891b2, #0e7490);
+        }
+        
+        .stat-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .stat-value {
+            font-size: 1.125rem;
+            font-weight: 700;
+            color: #f8fafc;
+            line-height: 1.2;
+        }
+        
+        .stat-label {
+            font-size: 0.75rem;
+            color: #cbd5e1;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 0.125rem;
+        }
+        
+        /* Responsive */
+        @media (min-width: 768px) {
+            .dashboard-header {
+                display: block;
+            }
+            
+            .mobile-header {
+                display: none;
+            }
+            
+            .main-content {
+                padding-bottom: 1.5rem;
+            }
+            
+            .dashboard-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 2rem;
+            }
+            
+            .account-stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        @media (min-width: 1024px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+            
+            .account-stats {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+        
+        /* Mobile specific */
+        @media (max-width: 360px) {
+            .account-stats {
+                grid-template-columns: 1fr;
+                gap: 0.75rem;
+            }
+            
+            .stat-item {
+                padding: 0.75rem;
+            }
+            
+            .stat-icon {
+                width: 40px;
+                height: 40px;
+                font-size: 1rem;
+            }
+        }
+        
+        /* CSS loading indicator */
+        body:not(.css-loaded) .dashboard {
+            /* Minimal styling while main CSS loads */
+        }
+    </style>
 </head>
 <body>
     <!-- Loading Screen -->
@@ -547,6 +976,23 @@
                 }
             }
         }
+        
+        // Additional CSS loading check
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🎨 Dashboard HTML fully loaded');
+            
+            // Check if external CSS loaded after 2 seconds
+            setTimeout(() => {
+                const allLoaded = document.querySelectorAll('link[rel="stylesheet"]').length > 0;
+                console.log(`📊 CSS links found: ${allLoaded}`);
+                
+                // If external CSS didn't load, ensure critical CSS is working
+                if (!document.body.classList.contains('css-loaded')) {
+                    console.log('⚠️ External CSS not detected, using critical CSS');
+                    document.body.classList.add('css-fallback');
+                }
+            }, 2000);
+        });
     </script>
 </body>
 </html>
