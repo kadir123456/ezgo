@@ -1,3 +1,11 @@
+# =================================================================
+# CSS MIME Type Fix - Dosyanın en başında
+# =================================================================
+import mimetypes
+mimetypes.add_type('text/css', '.css')
+mimetypes.add_type('application/javascript', '.js')
+mimetypes.add_type('application/json', '.json')
+
 import logging
 import time
 import traceback
@@ -7,6 +15,7 @@ import os
 import re
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 # ------------------------------
 # Üçüncü Parti Kütüphaneler
@@ -28,6 +37,37 @@ from app.config import settings
 from app.utils.metrics import metrics, get_metrics_data, get_metrics_content_type
 from app.routes import auth, bot, user, config
 
+# =================================================================
+# Custom StaticFiles Class - CSS MIME Type Fix
+# =================================================================
+class FixedStaticFiles(StaticFiles):
+    """CSS ve JS dosyaları için MIME type'ları düzelten custom StaticFiles"""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    async def get_response(self, path: str, scope):
+        try:
+            response = await super().get_response(path, scope)
+            
+            # MIME type düzeltmeleri
+            if path.endswith('.css'):
+                response.headers['content-type'] = 'text/css; charset=utf-8'
+                response.headers['cache-control'] = 'public, max-age=31536000'
+            elif path.endswith('.js'):
+                response.headers['content-type'] = 'application/javascript; charset=utf-8'
+                response.headers['cache-control'] = 'public, max-age=31536000'
+            elif path.endswith('.json'):
+                response.headers['content-type'] = 'application/json; charset=utf-8'
+            elif path.endswith('.html'):
+                response.headers['content-type'] = 'text/html; charset=utf-8'
+                response.headers['cache-control'] = 'no-cache'
+                
+            return response
+        except Exception as e:
+            logging.error(f"Static file error for {path}: {e}")
+            raise
+
 # ------------------------------
 # FastAPI Uygulaması
 # ------------------------------
@@ -42,11 +82,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Statik dosya klasörü
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Statik dosya klasörü - DÜZELTILMIŞ
+app.mount("/static", FixedStaticFiles(directory="static"), name="static")
 
 # ------------------------------
-# Router’ların eklenmesi
+# Router'ların eklenmesi
 # ------------------------------
 app.include_router(auth.router)
 app.include_router(bot.router)
@@ -360,8 +400,45 @@ async def enhanced_logging_middleware(request: Request, call_next):
         logger.error(f"💥 {request.method} {request.url.path} - EXCEPTION ({process_time:.3f}s): {e}")
         raise e
 
-# Static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# =================================================================
+# CSS ve JS için özel route'lar - MIME type garantisi
+# =================================================================
+@app.get("/static/dashboard.css")
+async def serve_dashboard_css():
+    """Dashboard CSS dosyası için özel route"""
+    css_path = Path("static/dashboard.css")
+    if css_path.exists():
+        return FileResponse(
+            css_path, 
+            media_type="text/css", 
+            headers={
+                "Cache-Control": "public, max-age=31536000",
+                "Content-Type": "text/css; charset=utf-8"
+            }
+        )
+    else:
+        logger.error("dashboard.css file not found")
+        raise HTTPException(status_code=404, detail="CSS file not found")
+
+@app.get("/static/dashboard.js")
+async def serve_dashboard_js():
+    """Dashboard JS dosyası için özel route"""
+    js_path = Path("static/dashboard.js")
+    if js_path.exists():
+        return FileResponse(
+            js_path, 
+            media_type="application/javascript",
+            headers={
+                "Cache-Control": "public, max-age=31536000", 
+                "Content-Type": "application/javascript; charset=utf-8"
+            }
+        )
+    else:
+        logger.error("dashboard.js file not found")
+        raise HTTPException(status_code=404, detail="JS file not found")
+
+# Static files - İkinci mount (fallback)
+app.mount("/static", FixedStaticFiles(directory="static"), name="static")
 
 @app.on_event("startup")
 async def startup_event():
@@ -370,6 +447,13 @@ async def startup_event():
         logger.info("🚀 EzyagoTrading starting up...")
         logger.info(f"🌍 Environment: {settings.ENVIRONMENT}")
         logger.info(f"🐛 Debug mode: {settings.DEBUG}")
+        
+        # CSS dosyası kontrolü
+        css_path = Path("static/dashboard.css")
+        if css_path.exists():
+            logger.info("✅ dashboard.css file found")
+        else:
+            logger.error("❌ dashboard.css file not found!")
         
         # Firebase connection status
         if firebase_initialized:
@@ -1681,42 +1765,42 @@ async def get_metrics():
         logger.error(f"Metrics error: {e}")
         return PlainTextResponse("# Metrics not available")
 
-# Static routes
+# Static routes - DÜZELTILMIŞ
 @app.get("/")
 async def read_root():
-    return FileResponse("static/index.html")
+    return FileResponse("static/index.html", media_type="text/html")
 
 @app.get("/login")
 async def read_login():
-    return FileResponse("static/login.html")
+    return FileResponse("static/login.html", media_type="text/html")
 
 @app.get("/login.html")
 async def read_login_html():
-    return FileResponse("static/login.html")
+    return FileResponse("static/login.html", media_type="text/html")
 
 @app.get("/register")
 async def read_register():
-    return FileResponse("static/register.html")
+    return FileResponse("static/register.html", media_type="text/html")
 
 @app.get("/register.html")
 async def read_register_html():
-    return FileResponse("static/register.html")
+    return FileResponse("static/register.html", media_type="text/html")
 
 @app.get("/dashboard")
 async def read_dashboard():
-    return FileResponse("static/dashboard.html")
+    return FileResponse("static/dashboard.html", media_type="text/html")
 
 @app.get("/dashboard.html")
 async def read_dashboard_html():
-    return FileResponse("static/dashboard.html")
+    return FileResponse("static/dashboard.html", media_type="text/html")
 
 @app.get("/admin")
 async def read_admin():
-    return FileResponse("static/admin.html")
+    return FileResponse("static/admin.html", media_type="text/html")
 
 @app.get("/admin.html")
 async def read_admin_html():
-    return FileResponse("static/admin.html")
+    return FileResponse("static/admin.html", media_type="text/html")
 
 # Catch-all for SPA
 @app.get("/{full_path:path}")
@@ -1727,7 +1811,7 @@ async def catch_all(full_path: str):
         full_path in ["dashboard", "login", "register", "admin"]):
         raise HTTPException(status_code=404, detail="File not found")
     
-    return FileResponse("static/index.html")
+    return FileResponse("static/index.html", media_type="text/html")
 
 if __name__ == "__main__":
     import uvicorn
