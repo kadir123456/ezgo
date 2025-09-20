@@ -11,479 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     
-    <!-- ✅ FIXED: CSS Bağlantısı Fallback Sistemli -->
-    <link rel="stylesheet" href="/static/dashboard.css?v=2024.1" onerror="this.onerror=null; loadFallbackCSS();">
-    
-    <!-- ✅ CSS Yükleme Kontrolü ve Fallback Sistemi -->
-    <script>
-        function loadFallbackCSS() {
-            console.warn('⚠️ CSS yüklenemedi, alternatif yol deneniyor...');
-            
-            const fallbackPaths = [
-                './static/dashboard.css?v=' + Date.now(),
-                'static/dashboard.css?v=' + Date.now(),
-                '/dashboard.css?v=' + Date.now()
-            ];
-            
-            let currentPath = 0;
-            
-            function tryNextPath() {
-                if (currentPath >= fallbackPaths.length) {
-                    console.error('❌ Tüm CSS yolları başarısız, minimal CSS uygulanıyor');
-                    applyEmergencyCSS();
-                    return;
-                }
-                
-                const link = document.createElement('link');
-                link.rel = 'stylesheet';
-                link.href = fallbackPaths[currentPath];
-                
-                link.onload = function() {
-                    console.log('✅ CSS yüklendi:', fallbackPaths[currentPath]);
-                };
-                
-                link.onerror = function() {
-                    console.warn('❌ CSS yüklenemedi:', fallbackPaths[currentPath]);
-                    document.head.removeChild(link);
-                    currentPath++;
-                    tryNextPath();
-                };
-                
-                document.head.appendChild(link);
-            }
-            
-            tryNextPath();
-        }
-        
-        function applyEmergencyCSS() {
-            if (document.getElementById('emergency-css')) return;
-            
-            const style = document.createElement('style');
-            style.id = 'emergency-css';
-            style.textContent = \`
-                /* Emergency Dashboard CSS */
-                :root {
-                    --primary-color: #2563eb;
-                    --success-color: #059669;
-                    --danger-color: #dc2626;
-                    --warning-color: #d97706;
-                    --text-primary: #1f2937;
-                    --text-secondary: #6b7280;
-                    --bg-primary: #ffffff;
-                    --bg-secondary: #f8fafc;
-                    --border-color: #e5e7eb;
-                }
-                
-                * { box-sizing: border-box; margin: 0; padding: 0; }
-                
-                body {
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                    background: var(--bg-secondary);
-                    color: var(--text-primary);
-                    line-height: 1.6;
-                }
-                
-                .loading-screen {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    z-index: 9999;
-                    color: white;
-                }
-                
-                .loading-spinner {
-                    width: 40px;
-                    height: 40px;
-                    border: 4px solid rgba(255,255,255,0.3);
-                    border-top: 4px solid white;
-                    border-radius: 50%;
-                    animation: spin 1s linear infinite;
-                    margin: 1rem auto;
-                }
-                
-                @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-                
-                .dashboard {
-                    min-height: 100vh;
-                    display: block;
-                }
-                
-                .hidden {
-                    display: none !important;
-                }
-                
-                .dashboard-header {
-                    background: #1f2937;
-                    color: white;
-                    padding: 1rem 0;
-                }
-                
-                .header-content {
-                    max-width: 1400px;
-                    margin: 0 auto;
-                    padding: 0 1rem;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                }
-                
-                .logo {
-                    display: flex;
-                    align-items: center;
-                    gap: 0.5rem;
-                    font-weight: 700;
-                    font-size: 1.25rem;
-                }
-                
-                .header-info {
-                    display: flex;
-                    align-items: center;
-                    gap: 1rem;
-                }
-                
-                .subscription-badge {
-                    display: flex;
-                    align-items: center;
-                    gap: 0.5rem;
-                    background: var(--success-color);
-                    padding: 0.25rem 0.75rem;
-                    border-radius: 6px;
-                    font-size: 0.875rem;
-                }
-                
-                .main-content {
-                    padding: 2rem 1rem;
-                }
-                
-                .dashboard-grid {
-                    display: grid;
-                    gap: 1.5rem;
-                    max-width: 1400px;
-                    margin: 0 auto;
-                }
-                
-                .card {
-                    background: white;
-                    padding: 1.5rem;
-                    border-radius: 8px;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                    border: 1px solid var(--border-color);
-                }
-                
-                .card-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 1rem;
-                    padding-bottom: 1rem;
-                    border-bottom: 1px solid var(--border-color);
-                }
-                
-                .card-header h2 {
-                    display: flex;
-                    align-items: center;
-                    gap: 0.5rem;
-                    font-size: 1.25rem;
-                    font-weight: 600;
-                }
-                
-                .btn {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 0.5rem;
-                    padding: 0.75rem 1.5rem;
-                    border: none;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    text-decoration: none;
-                    transition: all 0.2s;
-                    font-weight: 500;
-                }
-                
-                .btn-primary { background: var(--primary-color); color: white; }
-                .btn-success { background: var(--success-color); color: white; }
-                .btn-danger { background: var(--danger-color); color: white; }
-                .btn-outline { background: transparent; border: 1px solid var(--border-color); color: var(--text-secondary); }
-                .btn-sm { padding: 0.5rem 1rem; font-size: 0.875rem; }
-                
-                .btn:hover { opacity: 0.9; transform: translateY(-1px); }
-                .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-                
-                .form-input {
-                    width: 100%;
-                    padding: 0.75rem;
-                    border: 1px solid var(--border-color);
-                    border-radius: 6px;
-                    font-size: 0.875rem;
-                }
-                
-                .form-input:focus {
-                    outline: none;
-                    border-color: var(--primary-color);
-                    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-                }
-                
-                .account-stats {
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                    gap: 1rem;
-                    margin-bottom: 1.5rem;
-                }
-                
-                .stat-item {
-                    display: flex;
-                    align-items: center;
-                    gap: 1rem;
-                    padding: 1rem;
-                    background: var(--bg-secondary);
-                    border-radius: 8px;
-                }
-                
-                .stat-icon {
-                    width: 48px;
-                    height: 48px;
-                    border-radius: 50%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: white;
-                }
-                
-                .stat-icon.primary { background: var(--primary-color); }
-                .stat-icon.success { background: var(--success-color); }
-                .stat-icon.warning { background: var(--warning-color); }
-                .stat-icon.info { background: #0891b2; }
-                
-                .stat-value {
-                    font-size: 1.25rem;
-                    font-weight: 600;
-                }
-                
-                .stat-label {
-                    font-size: 0.875rem;
-                    color: var(--text-secondary);
-                }
-                
-                .setting-row {
-                    display: grid;
-                    gap: 1rem;
-                    margin-bottom: 1rem;
-                }
-                
-                .setting-group {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 0.5rem;
-                }
-                
-                .setting-group label {
-                    font-weight: 500;
-                    color: var(--text-primary);
-                    font-size: 0.875rem;
-                }
-                
-                .api-status-box {
-                    padding: 1rem;
-                    border: 1px solid var(--border-color);
-                    border-radius: 8px;
-                    margin-bottom: 1rem;
-                    background: var(--bg-secondary);
-                }
-                
-                .api-status-indicator {
-                    display: flex;
-                    align-items: center;
-                    gap: 0.5rem;
-                    margin-bottom: 0.5rem;
-                    font-weight: 500;
-                }
-                
-                .api-status-indicator.connected { color: var(--success-color); }
-                .api-status-indicator.error { color: var(--danger-color); }
-                
-                .bot-status {
-                    display: flex;
-                    align-items: center;
-                    gap: 0.5rem;
-                }
-                
-                .status-dot {
-                    width: 12px;
-                    height: 12px;
-                    border-radius: 50%;
-                    background: var(--danger-color);
-                }
-                
-                .status-dot.active {
-                    background: var(--success-color);
-                }
-                
-                .control-buttons {
-                    display: grid;
-                    grid-template-columns: 1fr 1fr;
-                    gap: 1rem;
-                    margin: 1rem 0;
-                }
-                
-                .status-message {
-                    display: flex;
-                    align-items: center;
-                    gap: 0.5rem;
-                    padding: 1rem;
-                    border-radius: 6px;
-                    font-size: 0.875rem;
-                    background: rgba(8, 145, 178, 0.1);
-                    color: #0891b2;
-                    border: 1px solid rgba(8, 145, 178, 0.2);
-                }
-                
-                .empty-state {
-                    text-align: center;
-                    padding: 3rem 1rem;
-                    color: var(--text-secondary);
-                }
-                
-                .empty-state i {
-                    font-size: 3rem;
-                    margin-bottom: 1rem;
-                    opacity: 0.5;
-                }
-                
-                .mobile-header {
-                    display: none;
-                }
-                
-                /* Strategy Info Card */
-                .strategy-info-card {
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    border-radius: 12px;
-                    padding: 16px;
-                    margin: 16px 0;
-                    color: white;
-                }
-                
-                .strategy-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: flex-start;
-                    margin-bottom: 12px;
-                }
-                
-                .strategy-title {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 8px;
-                }
-                
-                .strategy-title h4 {
-                    margin: 0;
-                    font-size: 18px;
-                    font-weight: 600;
-                    color: white;
-                }
-                
-                .strategy-metrics {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 4px;
-                    align-items: flex-end;
-                }
-                
-                .strategy-metrics .metric {
-                    font-size: 12px;
-                    background: rgba(255, 255, 255, 0.2);
-                    padding: 4px 8px;
-                    border-radius: 6px;
-                    white-space: nowrap;
-                }
-                
-                .risk-badge {
-                    font-size: 11px;
-                    font-weight: 600;
-                    padding: 4px 8px;
-                    border-radius: 6px;
-                    text-transform: uppercase;
-                    letter-spacing: 0.5px;
-                }
-                
-                .risk-badge.low {
-                    background: rgba(34, 197, 94, 0.2);
-                    color: #22c55e;
-                    border: 1px solid rgba(34, 197, 94, 0.3);
-                }
-                
-                .risk-badge.medium {
-                    background: rgba(245, 158, 11, 0.2);
-                    color: #f59e0b;
-                    border: 1px solid rgba(245, 158, 11, 0.3);
-                }
-                
-                .risk-badge.high {
-                    background: rgba(239, 68, 68, 0.2);
-                    color: #ef4444;
-                    border: 1px solid rgba(239, 68, 68, 0.3);
-                }
-                
-                .strategy-description {
-                    margin: 0;
-                    font-size: 14px;
-                    opacity: 0.9;
-                    line-height: 1.4;
-                }
-                
-                @media (min-width: 768px) {
-                    .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
-                    .setting-row { grid-template-columns: repeat(3, 1fr); }
-                }
-                
-                @media (max-width: 768px) {
-                    .dashboard-header { display: none; }
-                    .mobile-header { display: block; background: #1f2937; color: white; padding: 1rem; }
-                    .dashboard-grid { grid-template-columns: 1fr; }
-                    .account-stats { grid-template-columns: repeat(2, 1fr); }
-                    .setting-row { grid-template-columns: 1fr; }
-                    .control-buttons { grid-template-columns: 1fr; }
-                }
-            \`;
-            
-            document.head.appendChild(style);
-            console.log('✅ Emergency CSS uygulandı');
-        }
-        
-        // CSS yükleme kontrolü
-        document.addEventListener('DOMContentLoaded', function() {
-            setTimeout(() => {
-                const testDiv = document.createElement('div');
-                testDiv.className = 'card';
-                testDiv.style.position = 'absolute';
-                testDiv.style.visibility = 'hidden';
-                testDiv.style.top = '-1000px';
-                document.body.appendChild(testDiv);
-                
-                const computedStyle = window.getComputedStyle(testDiv);
-                const hasCSS = computedStyle.backgroundColor !== 'rgba(0, 0, 0, 0)' && 
-                              computedStyle.backgroundColor !== 'transparent';
-                
-                document.body.removeChild(testDiv);
-                
-                if (hasCSS) {
-                    console.log('✅ CSS başarıyla yüklendi');
-                } else {
-                    console.warn('⚠️ CSS yüklenmemiş, fallback başlatılıyor');
-                    loadFallbackCSS();
-                }
-            }, 500);
-        });
-    </script>
+    <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
     <!-- Loading Screen -->
@@ -694,15 +222,14 @@
                                         </select>
                                     </div>
                                     
-                                    <!-- ✅ UPDATED: Smart Timeframe Selection -->
                                     <div class="setting-group">
                                         <label for="timeframe-select">Zaman Dilimi:</label>
-                                        <select id="timeframe-select" class="form-input timeframe-smart-select">
-                                            <option value="5m">5m - 🏃‍♂️ Hızlı Scalping (75% Win Rate)</option>
-                                            <option value="15m" selected>15m - 📈 Dengeli Swing (70% Win Rate)</option>
-                                            <option value="30m">30m - 🎯 Trend Takip (65% Win Rate)</option>
-                                            <option value="1h">1h - 🏔️ Pozisyon Trading (60% Win Rate)</option>
-                                            <option value="4h">4h - 🚀 Major Trend (55% Win Rate)</option>
+                                        <select id="timeframe-select" class="form-input">
+                                            <option value="5m">5 Dakika</option>
+                                            <option value="15m" selected>15 Dakika</option>
+                                            <option value="30m">30 Dakika</option>
+                                            <option value="1h">1 Saat</option>
+                                            <option value="4h">4 Saat</option>
                                         </select>
                                     </div>
                                     
@@ -715,23 +242,6 @@
                                             <option value="50">50x</option>
                                         </select>
                                     </div>
-                                </div>
-
-                                <!-- ✅ ADDED: Strategy Info Card -->
-                                <div class="strategy-info-card" id="strategy-info-card">
-                                    <div class="strategy-header">
-                                        <div class="strategy-title">
-                                            <h4 id="strategy-name">📈 Dengeli Swing</h4>
-                                            <span class="risk-badge low" id="risk-badge">DÜŞÜK RİSK</span>
-                                        </div>
-                                        <div class="strategy-metrics">
-                                            <span class="metric" id="expected-win-rate">🎯 70% Win Rate</span>
-                                            <span class="metric" id="max-hold-time">⏱️ Max: 2 saat</span>
-                                        </div>
-                                    </div>
-                                    <p class="strategy-description" id="strategy-description">
-                                        Günde 5-10 trade, istikrarlı kar
-                                    </p>
                                 </div>
                                 
                                 <div class="setting-row">
@@ -746,42 +256,15 @@
                                     </div>
                                 </div>
                                 
-                                <!-- ✅ UPDATED: Smart SL/TP with Recommendations -->
                                 <div class="setting-row">
                                     <div class="setting-group">
-                                        <label for="stop-loss">
-                                            Stop Loss (%):
-                                            <button type="button" class="recommendation-btn active" id="sl-recommendation-btn" title="Önerilen değeri kullan">
-                                                💡 ÖNERİLEN
-                                            </button>
-                                        </label>
-                                        <div class="input-with-recommendation">
-                                            <input type="number" id="stop-loss" class="form-input recommended-input" value="0.8" min="0.1" max="25" step="0.1">
-                                            <div class="recommendation-hint" id="sl-hint" style="display: none;">
-                                                💡 Önerilen: <span id="sl-recommended-value">0.8</span>%
-                                                <button type="button" class="use-recommended-btn" id="use-sl-recommended">
-                                                    Kullan
-                                                </button>
-                                            </div>
-                                        </div>
+                                        <label for="stop-loss">Stop Loss (%):</label>
+                                        <input type="number" id="stop-loss" class="form-input" value="2" min="0.1" max="25" step="0.1">
                                     </div>
                                     
                                     <div class="setting-group">
-                                        <label for="take-profit">
-                                            Take Profit (%):
-                                            <button type="button" class="recommendation-btn active" id="tp-recommendation-btn" title="Önerilen değeri kullan">
-                                                💡 ÖNERİLEN
-                                            </button>
-                                        </label>
-                                        <div class="input-with-recommendation">
-                                            <input type="number" id="take-profit" class="form-input recommended-input" value="1.2" min="0.1" max="50" step="0.1">
-                                            <div class="recommendation-hint" id="tp-hint" style="display: none;">
-                                                💡 Önerilen: <span id="tp-recommended-value">1.2</span>%
-                                                <button type="button" class="use-recommended-btn" id="use-tp-recommended">
-                                                    Kullan
-                                                </button>
-                                            </div>
-                                        </div>
+                                        <label for="take-profit">Take Profit (%):</label>
+                                        <input type="number" id="take-profit" class="form-input" value="4" min="0.1" max="50" step="0.1">
                                     </div>
                                 </div>
 
@@ -864,7 +347,7 @@
                             </button>
                         </div>
                         <div class="card-content">
-                            <div id="activity-list" class="activity-list-container">
+                            <div id="activity-list">
                                 <div class="empty-state">
                                     <i class="fas fa-history"></i>
                                     <h3>Henüz İşlem Yok</h3>
@@ -1043,9 +526,27 @@
     <!-- Configuration loader -->
     <script src="/static/js/config.js"></script>
     
-    <!-- ✅ Dashboard JavaScript - Cleaned -->
+    <!-- Dashboard JavaScript -->
     <script src="/static/dashboard.js"></script>
     
-    <!-- ✅ REMOVED: Duplicate JavaScript - Tüm logic dashboard.js'de -->
+    <script>
+        // Advanced settings toggle
+        function toggleAdvancedSettings() {
+            const content = document.getElementById('advanced-settings-content');
+            const toggle = document.getElementById('advanced-toggle');
+            
+            if (content && toggle) {
+                const isShowing = content.classList.contains('show');
+                
+                if (isShowing) {
+                    content.classList.remove('show');
+                    toggle.innerHTML = '<i class="fas fa-chevron-down"></i>';
+                } else {
+                    content.classList.add('show');
+                    toggle.innerHTML = '<i class="fas fa-chevron-up"></i>';
+                }
+            }
+        }
+    </script>
 </body>
 </html>
