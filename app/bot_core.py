@@ -523,11 +523,11 @@ class BotCore:
                 
                 # Strategy type'a göre interval ayarla
                 strategy_intervals = {
-                    "scalping": 10,      # 10 saniye (5m)
-                    "swing": 15,         # 15 saniye (15m)
-                    "trend_following": 30, # 30 saniye (30m)
-                    "position": 60,      # 1 dakika (1h)
-                    "major_trend": 120   # 2 dakika (4h)
+                    "scalping": 300,      # 10 saniye (5m)
+                    "swing": 900,         # 15 saniye (15m)
+                    "trend_following": 1800, # 30 saniye (30m)
+                    "position": 3600,      # 1 dakika (1h)
+                    "major_trend": 14400   # 2 dakika (4h)
                 }
                 
                 interval = strategy_intervals.get(self.status["strategy_type"], 15)
