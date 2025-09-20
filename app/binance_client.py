@@ -86,40 +86,43 @@ class PriceManager:
             self.bm: Optional[BinanceSocketManager] = None
             self.websocket_tasks: Dict[str, asyncio.Task] = {}
             self.is_running = False
+            self._lock = asyncio.Lock()  # Thread safety için
             PriceManager._initialized = True
     
     async def initialize(self):
         """WebSocket manager'ı başlat"""
-        if self.is_running:
-            return True
-            
-        try:
-            # Public client (API key gerekmez)
-            self.client = await AsyncClient.create(
-                testnet=settings.ENVIRONMENT == "TEST"
-            )
-            self.bm = BinanceSocketManager(self.client)
-            self.is_running = True
-            
-            logger.info("PriceManager initialized successfully")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to initialize PriceManager: {e}")
-            return False
+        async with self._lock:
+            if self.is_running:
+                return True
+                
+            try:
+                # Public client (API key gerekmez)
+                self.client = await AsyncClient.create(
+                    testnet=settings.ENVIRONMENT == "TEST"
+                )
+                self.bm = BinanceSocketManager(self.client)
+                self.is_running = True
+                
+                logger.info("PriceManager initialized successfully")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to initialize PriceManager: {e}")
+                return False
     
     async def subscribe_symbol(self, symbol: str):
         """Symbol'e abone ol"""
-        if symbol not in self.subscribed_symbols and self.is_running:
-            self.subscribed_symbols.add(symbol)
-            
-            # Bu symbol için WebSocket başlat
-            task_name = f"ws_{symbol}"
-            if task_name not in self.websocket_tasks:
-                self.websocket_tasks[task_name] = asyncio.create_task(
-                    self._symbol_websocket(symbol)
-                )
-            
-            logger.info(f"Subscribed to {symbol} price stream")
+        async with self._lock:
+            if symbol not in self.subscribed_symbols and self.is_running:
+                self.subscribed_symbols.add(symbol)
+                
+                # Bu symbol için WebSocket başlat
+                task_name = f"ws_{symbol}"
+                if task_name not in self.websocket_tasks:
+                    self.websocket_tasks[task_name] = asyncio.create_task(
+                        self._symbol_websocket(symbol)
+                    )
+                
+                logger.info(f"Subscribed to {symbol} price stream")
     
     async def _symbol_websocket(self, symbol: str):
         """Symbol için WebSocket stream"""
@@ -182,18 +185,33 @@ class PriceManager:
     
     async def close(self):
         """Tüm bağlantıları kapat"""
-        self.is_running = False
-        
-        # WebSocket task'ları iptal et
-        for task in self.websocket_tasks.values():
-            if not task.done():
-                task.cancel()
-        
-        # Client'ı kapat
-        if self.client:
-            await self.client.close_connection()
-        
-        logger.info("PriceManager closed")
+        async with self._lock:
+            self.is_running = False
+            
+            # WebSocket task'ları iptal et
+            for task in self.websocket_tasks.values():
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        logger.error(f"Error cancelling websocket task: {e}")
+            
+            # Task listesini temizle
+            self.websocket_tasks.clear()
+            
+            # Client'ı kapat
+            if self.client:
+                try:
+                    await self.client.close_connection()
+                except Exception as e:
+                    logger.error(f"Error closing PriceManager client: {e}")
+                finally:
+                    self.client = None
+            
+            logger.info("PriceManager closed")
 
 
 class BinanceClient:
@@ -214,6 +232,7 @@ class BinanceClient:
         self.client: AsyncClient | None = None
         self.exchange_info = None
         self.is_public_only = not bool(self.api_key and self.api_secret)
+        self._connection_closed = False
         
         # Cache variables - kullanıcıya özel
         self._last_balance_check = 0
@@ -240,9 +259,7 @@ class BinanceClient:
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit - only close client connection"""
-        if self.client:
-            await self.client.close_connection()
-            self.client = None
+        await self.close()
     
     async def initialize(self):
         """Client'ı başlat ve test et"""
@@ -251,7 +268,7 @@ class BinanceClient:
             await self.price_manager.initialize()
             
             # User-specific client oluştur
-            if self.client is None:
+            if self.client is None and not self._connection_closed:
                 if self.is_public_only:
                     # Public-only client (no API credentials needed)
                     self.client = await AsyncClient.create(
@@ -281,6 +298,22 @@ class BinanceClient:
         except Exception as e:
             logger.error(f"Initialization failed for user {self.user_id}: {e}")
             return False
+    
+    async def close(self):
+        """Client bağlantısını kapat - bu eksik olan metod!"""
+        if not self._connection_closed and self.client:
+            try:
+                await self.client.close_connection()
+                logger.info(f"BinanceClient connection closed for user: {self.user_id}")
+            except Exception as e:
+                logger.error(f"Error closing BinanceClient connection for user {self.user_id}: {e}")
+            finally:
+                self.client = None
+                self._connection_closed = True
+    
+    async def close_connection(self):
+        """Backward compatibility için - close() metodunu çağırır"""
+        await self.close()
     
     async def subscribe_to_symbol(self, symbol: str):
         """Symbol fiyatlarına abone ol"""
@@ -608,14 +641,3 @@ class BinanceClient:
         except Exception as e:
             logger.error(f"Error getting last trade PnL for {symbol} - user {self.user_id}: {e}")
             return 0.0
-    
-    async def close_connection(self):
-        """Sadece client bağlantısını kapat"""
-        if self.client:
-            try:
-                await self.client.close_connection()
-                logger.info(f"BinanceClient connection closed for user: {self.user_id}")
-            except Exception as e:
-                logger.error(f"Error closing BinanceClient connection for user {self.user_id}: {e}")
-            finally:
-                self.client = None
