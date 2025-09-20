@@ -202,6 +202,17 @@ class PriceManager:
             # Task listesini temizle
             self.websocket_tasks.clear()
             
+            # BinanceSocketManager'ı kapat
+            if self.bm:
+                try:
+                    # BinanceSocketManager'ın dahili session'larını kapat
+                    if hasattr(self.bm, '_session') and self.bm._session:
+                        await self.bm._session.close()
+                except Exception as e:
+                    logger.error(f"Error closing BinanceSocketManager: {e}")
+                finally:
+                    self.bm = None
+            
             # Client'ı kapat
             if self.client:
                 try:
@@ -282,10 +293,14 @@ class BinanceClient:
                         logger.error(f"API credentials missing for user: {self.user_id}")
                         return False
                     
+                    # Connection timeout ve retry settings ile daha güvenli client
                     self.client = await AsyncClient.create(
                         self.api_key, 
                         self.api_secret, 
-                        testnet=self.is_testnet
+                        testnet=self.is_testnet,
+                        requests_params={
+                            'timeout': 10,  # 10 saniye timeout
+                        }
                     )
                     
                     # Test connection with private endpoint
@@ -297,6 +312,13 @@ class BinanceClient:
                 
         except Exception as e:
             logger.error(f"Initialization failed for user {self.user_id}: {e}")
+            # Başarısız olan client'ı temizle
+            if self.client:
+                try:
+                    await self.client.close_connection()
+                except:
+                    pass
+                self.client = None
             return False
     
     async def close(self):
@@ -355,7 +377,16 @@ class BinanceClient:
             
             await self.rate_limiter.wait_if_needed('position', self.user_id)
             positions = await self.client.futures_position_information(symbol=symbol)
-            open_positions = [p for p in positions if float(p['positionAmt']) != 0]
+            
+            # Safe parsing - 'percentage' hatası için koruma
+            open_positions = []
+            for p in positions:
+                try:
+                    if float(p.get('positionAmt', 0)) != 0:
+                        open_positions.append(p)
+                except (ValueError, KeyError, TypeError) as parse_error:
+                    logger.warning(f"Position parsing error for {symbol} - user {self.user_id}: {parse_error}")
+                    continue
             
             # Cache güncelle
             self._last_position_check[cache_key] = current_time
@@ -369,6 +400,9 @@ class BinanceClient:
                 return self._cached_positions.get(symbol, [])
             logger.error(f"Error getting positions for {symbol} - user {self.user_id}: {e}")
             return []
+        except Exception as e:
+            logger.error(f"Unexpected error getting positions for {symbol} - user {self.user_id}: {e}")
+            return self._cached_positions.get(symbol, [])
     
     async def create_market_order_with_sl_tp(self, symbol: str, side: str, quantity: float, entry_price: float, price_precision: int):
         """Market order ile birlikte SL/TP oluştur"""
@@ -641,3 +675,34 @@ class BinanceClient:
         except Exception as e:
             logger.error(f"Error getting last trade PnL for {symbol} - user {self.user_id}: {e}")
             return 0.0
+    
+    async def get_symbol_info(self, symbol: str):
+        """Symbol bilgilerini al"""
+        try:
+            if not self.exchange_info:
+                await self.rate_limiter.wait_if_needed('default', self.user_id)
+                self.exchange_info = await self.client.futures_exchange_info()
+            
+            for symbol_info in self.exchange_info['symbols']:
+                if symbol_info['symbol'] == symbol:
+                    return symbol_info
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting symbol info for {symbol} - user {self.user_id}: {e}")
+            return None
+    
+    async def get_historical_klines(self, symbol: str, interval: str, limit: int = 100):
+        """Geçmiş kline verilerini al"""
+        try:
+            await self.rate_limiter.wait_if_needed('default', self.user_id)
+            klines = await self.client.futures_klines(
+                symbol=symbol,
+                interval=interval,
+                limit=limit
+            )
+            return klines
+            
+        except Exception as e:
+            logger.error(f"Error getting historical klines for {symbol} - user {self.user_id}: {e}")
+            return []
