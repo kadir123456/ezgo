@@ -651,6 +651,72 @@ async def health_check():
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
+@app.get("/api/health-detailed")
+async def detailed_health_check():
+    """Detailed health check with all components"""
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "environment": settings.ENVIRONMENT,
+        "version": "1.0.0",
+        "components": {}
+    }
+    
+    # Firebase check
+    try:
+        if global_clients.firebase_initialized and global_clients.firebase_db:
+            # Test write
+            test_ref = global_clients.firebase_db.reference('health_check')
+            test_ref.set({
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'status': 'healthy'
+            })
+            health_status["components"]["firebase"] = {
+                "status": "healthy",
+                "database_connected": True,
+                "auth_available": global_clients.firebase_auth is not None
+            }
+        else:
+            health_status["components"]["firebase"] = {
+                "status": "unhealthy", 
+                "database_connected": False,
+                "error": "Firebase not initialized"
+            }
+            health_status["status"] = "degraded"
+    except Exception as e:
+        health_status["components"]["firebase"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        health_status["status"] = "degraded"
+    
+    # Environment variables check
+    required_vars = ["FIREBASE_CREDENTIALS_JSON", "ENCRYPTION_KEY", "ADMIN_EMAIL"]
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    
+    health_status["components"]["environment"] = {
+        "status": "healthy" if not missing_vars else "unhealthy",
+        "missing_variables": missing_vars,
+        "total_env_vars": len([k for k in os.environ.keys() if k.startswith(('FIREBASE_', 'ADMIN_', 'ENCRYPTION_'))])
+    }
+    
+    if missing_vars:
+        health_status["status"] = "degraded"
+    
+    # System resources
+    try:
+        import psutil
+        memory = psutil.virtual_memory()
+        health_status["components"]["system"] = {
+            "status": "healthy",
+            "memory_usage_percent": memory.percent,
+            "available_memory_gb": round(memory.available / (1024**3), 2)
+        }
+    except:
+        health_status["components"]["system"] = {"status": "unknown"}
+    
+    return health_status
+
 # Firebase config for frontend
 @app.get("/api/firebase-config")
 async def get_firebase_config():
@@ -953,9 +1019,6 @@ async def save_api_keys(request: dict, current_user: dict = Depends(get_current_
             detail=f"API keys could not be saved: {str(e)}"
         )
 
-# Continue with rest of your endpoints...
-# (dashboard-data, profile, account, positions, etc. remain the same)
-
 @app.get("/api/user/dashboard-data")
 async def get_dashboard_data(current_user: dict = Depends(get_current_user)):
     """Get all dashboard data in a single optimized API call - with singleton clients"""
@@ -1191,6 +1254,138 @@ async def get_dashboard_data(current_user: dict = Depends(get_current_user)):
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
+@app.get("/api/user/positions")
+async def get_user_positions(current_user: dict = Depends(get_current_user)):
+    """Get user positions - ALWAYS returns array"""
+    try:
+        user_id = current_user['uid']
+        positions = []  # Initialize as empty array
+        
+        if not global_clients.firebase_initialized or not global_clients.firebase_db:
+            return positions  # Return empty array if Firebase unavailable
+        
+        try:
+            user_ref = global_clients.firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
+            
+            if user_data and user_data.get('api_keys_set'):
+                try:
+                    # Use optimized singleton client
+                    client = await get_binance_client_for_user(user_id)
+                    
+                    # Only get positions for private clients
+                    if not hasattr(client, 'is_public_only') or not client.is_public_only:
+                        # Get all open positions
+                        all_symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "DOTUSDT"]
+                        
+                        for symbol in all_symbols:
+                            try:
+                                symbol_positions = await client.get_open_positions(symbol, use_cache=True)
+                                for pos in symbol_positions:
+                                    try:
+                                        position_amt = float(pos.get('positionAmt', 0))
+                                        if position_amt != 0:  # Only include non-zero positions
+                                            isolated_wallet = float(pos.get('isolatedWallet', 0))
+                                            unrealized_profit = float(pos.get('unRealizedProfit', 0))
+                                            
+                                            # Safe percentage calculation
+                                            percentage = 0.0
+                                            if isolated_wallet != 0:
+                                                try:
+                                                    percentage = (unrealized_profit / isolated_wallet) * 100
+                                                except (ZeroDivisionError, TypeError):
+                                                    percentage = 0.0
+                                            
+                                            positions.append({
+                                                "symbol": pos.get('symbol', ''),
+                                                "positionSide": "LONG" if position_amt > 0 else "SHORT",
+                                                "positionAmt": str(abs(position_amt)),
+                                                "entryPrice": pos.get('entryPrice', '0'),
+                                                "markPrice": pos.get('markPrice', '0'),
+                                                "unrealizedPnl": unrealized_profit,
+                                                "percentage": percentage,
+                                                "leverage": pos.get('leverage', '1'),
+                                                "marginType": pos.get('marginType', 'CROSSED')
+                                            })
+                                    except (ValueError, TypeError, KeyError) as pos_error:
+                                        logger.error(f"Error processing position: {pos_error}")
+                                        continue  # Skip invalid position data
+                            except Exception as symbol_error:
+                                logger.error(f"Error getting positions for {symbol}: {symbol_error}")
+                                continue
+                            
+                except Exception as e:
+                    logger.error(f"Error getting positions for user {user_id}: {e}")
+                    # Return empty array on error
+                    
+        except Exception as db_error:
+            logger.error(f"Database error in positions: {db_error}")
+        
+        # ALWAYS return array (even if empty)
+        return positions
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Positions error: {e}")
+        # Return empty array instead of raising exception
+        return []
+
+@app.get("/api/user/recent-trades")
+async def get_recent_trades(current_user: dict = Depends(get_current_user), limit: int = 10):
+    """Get recent trades - ALWAYS returns array"""
+    try:
+        user_id = current_user['uid']
+        trades = []  # Initialize as empty array
+        
+        if not global_clients.firebase_initialized or not global_clients.firebase_db:
+            return trades  # Return empty array if Firebase unavailable
+        
+        try:
+            # Get from Firebase first
+            trades_ref = global_clients.firebase_db.reference('trades')
+            query = trades_ref.order_by_child('user_id').equal_to(user_id).limit_to_last(limit)
+            snapshot = query.get()
+            
+            if snapshot and isinstance(snapshot, dict):
+                for trade_id, trade_data in snapshot.items():
+                    try:
+                        trades.append({
+                            "id": trade_id,
+                            "symbol": trade_data.get("symbol", ""),
+                            "side": trade_data.get("side", ""),
+                            "quantity": float(trade_data.get("quantity", 0)),
+                            "price": float(trade_data.get("price", 0)),
+                            "quoteQty": float(trade_data.get("quote_qty", 0)),
+                            "pnl": float(trade_data.get("pnl", 0)),
+                            "status": trade_data.get("status", "UNKNOWN"),
+                            "time": trade_data.get("timestamp", 0)
+                        })
+                    except (ValueError, TypeError, KeyError) as trade_error:
+                        logger.error(f"Error processing trade: {trade_error}")
+                        continue  # Skip invalid trade data
+                        
+        except Exception as db_error:
+            logger.error(f"Database error in trades: {db_error}")
+        
+        # Sort by time (most recent first)
+        try:
+            trades.sort(key=lambda x: x.get("time", 0), reverse=True)
+            # Limit to requested number
+            trades = trades[:limit]
+        except Exception as sort_error:
+            logger.error(f"Error sorting trades: {sort_error}")
+        
+        # ALWAYS return array (even if empty)
+        return trades
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Recent trades error: {e}")
+        # Return empty array instead of raising exception
+        return []
+
 @app.get("/api/user/api-info")
 async def get_api_info(current_user: dict = Depends(get_current_user)):
     """Get API info (masked)"""
@@ -1261,19 +1456,83 @@ async def get_api_keys_status(current_user: dict = Depends(get_current_user)):
     """Get API keys status - same as api-info for compatibility"""
     return await get_api_info(current_user)
 
-# Add other essential endpoints here...
-# (Continue with remaining endpoints as needed)
+@app.get("/api/trading/pairs")
+async def get_trading_pairs(current_user: dict = Depends(get_current_user)):
+    """Get supported trading pairs - ALWAYS returns array"""
+    try:
+        pairs = [
+            {"symbol": "BTCUSDT", "baseAsset": "BTC", "quoteAsset": "USDT"},
+            {"symbol": "ETHUSDT", "baseAsset": "ETH", "quoteAsset": "USDT"},
+            {"symbol": "BNBUSDT", "baseAsset": "BNB", "quoteAsset": "USDT"},
+            {"symbol": "ADAUSDT", "baseAsset": "ADA", "quoteAsset": "USDT"},
+            {"symbol": "DOTUSDT", "baseAsset": "DOT", "quoteAsset": "USDT"},
+            {"symbol": "LINKUSDT", "baseAsset": "LINK", "quoteAsset": "USDT"},
+            {"symbol": "SOLUSDT", "baseAsset": "SOL", "quoteAsset": "USDT"},
+            {"symbol": "AVAXUSDT", "baseAsset": "AVAX", "quoteAsset": "USDT"},
+            {"symbol": "MATICUSDT", "baseAsset": "MATIC", "quoteAsset": "USDT"},
+            {"symbol": "XRPUSDT", "baseAsset": "XRP", "quoteAsset": "USDT"}
+        ]
+        
+        return pairs
+        
+    except Exception as e:
+        logger.error(f"Trading pairs error: {e}")
+        # Return default pairs on any error
+        return [
+            {"symbol": "BTCUSDT", "baseAsset": "BTC", "quoteAsset": "USDT"},
+            {"symbol": "ETHUSDT", "baseAsset": "ETH", "quoteAsset": "USDT"},
+            {"symbol": "BNBUSDT", "baseAsset": "BNB", "quoteAsset": "USDT"}
+        ]
+
+# Metrics endpoint
+@app.get("/metrics")
+async def get_metrics():
+    """Prometheus metrics"""
+    try:
+        metrics_data = get_metrics_data()
+        return PlainTextResponse(content=metrics_data, media_type=get_metrics_content_type())
+    except Exception as e:
+        logger.error(f"Metrics error: {e}")
+        return PlainTextResponse("# Metrics not available")
 
 # =================================================================
-# STATIC ROUTES
+# STATIC ROUTES - COMPLETE SET
 # =================================================================
 @app.get("/")
 async def read_root():
     return FileResponse("static/index.html", media_type="text/html")
 
+@app.get("/login")
+async def read_login():
+    return FileResponse("static/login.html", media_type="text/html")
+
+@app.get("/login.html")
+async def read_login_html():
+    return FileResponse("static/login.html", media_type="text/html")
+
+@app.get("/register")
+async def read_register():
+    return FileResponse("static/register.html", media_type="text/html")
+
+@app.get("/register.html")
+async def read_register_html():
+    return FileResponse("static/register.html", media_type="text/html")
+
 @app.get("/dashboard")
 async def read_dashboard():
     return FileResponse("static/dashboard.html", media_type="text/html")
+
+@app.get("/dashboard.html")
+async def read_dashboard_html():
+    return FileResponse("static/dashboard.html", media_type="text/html")
+
+@app.get("/admin")
+async def read_admin():
+    return FileResponse("static/admin.html", media_type="text/html")
+
+@app.get("/admin.html")
+async def read_admin_html():
+    return FileResponse("static/admin.html", media_type="text/html")
 
 # Catch-all for SPA
 @app.get("/{full_path:path}")
