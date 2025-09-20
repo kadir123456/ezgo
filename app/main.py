@@ -35,7 +35,6 @@ from binance.exceptions import BinanceAPIException, BinanceRequestException
 # ------------------------------
 from app.config import settings
 from app.utils.metrics import metrics, get_metrics_data, get_metrics_content_type
-from app.routes import auth, bot, user, config
 
 # =================================================================
 # Custom StaticFiles Class - CSS MIME Type Fix
@@ -67,31 +66,6 @@ class FixedStaticFiles(StaticFiles):
         except Exception as e:
             logging.error(f"Static file error for {path}: {e}")
             raise
-
-# ------------------------------
-# FastAPI Uygulaması
-# ------------------------------
-app = FastAPI(title="My Trading API")
-
-# CORS middleware eklemek istersen
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Prod için spesifik domain gir
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Statik dosya klasörü - DÜZELTILMIŞ
-app.mount("/static", FixedStaticFiles(directory="static"), name="static")
-
-# ------------------------------
-# Router'ların eklenmesi
-# ------------------------------
-app.include_router(auth.router)
-app.include_router(bot.router)
-app.include_router(user.router)
-app.include_router(config.router)   # ✅ burası önemli
 
 # ------------------------------
 # Logging Ayarları
@@ -437,6 +411,23 @@ async def serve_dashboard_js():
         logger.error("dashboard.js file not found")
         raise HTTPException(status_code=404, detail="JS file not found")
 
+@app.get("/static/config.js")
+async def serve_config_js():
+    """Config JS dosyası için özel route"""
+    js_path = Path("static/config.js")
+    if js_path.exists():
+        return FileResponse(
+            js_path, 
+            media_type="application/javascript",
+            headers={
+                "Cache-Control": "public, max-age=31536000", 
+                "Content-Type": "application/javascript; charset=utf-8"
+            }
+        )
+    else:
+        logger.error("config.js file not found")
+        raise HTTPException(status_code=404, detail="Config JS file not found")
+
 # Static files - İkinci mount (fallback)
 app.mount("/static", FixedStaticFiles(directory="static"), name="static")
 
@@ -670,7 +661,9 @@ async def debug_firebase_status():
     
     return status
 
-# Auth routes
+# =================================================================
+# AUTH ENDPOINTS
+# =================================================================
 @app.post("/api/auth/verify")
 async def verify_token(current_user: dict = Depends(get_current_user)):
     """Verify Firebase token and create/update user data"""
@@ -705,8 +698,6 @@ async def verify_token(current_user: dict = Depends(get_current_user)):
                 # Calculate trial expiry (7 days from now)
                 trial_expiry = datetime.now(timezone.utc) + timedelta(days=7)
                 
-                from firebase_admin import db
-                
                 user_data = {
                     "email": email,
                     "created_at": int(datetime.utcnow().timestamp() * 1000),
@@ -723,7 +714,6 @@ async def verify_token(current_user: dict = Depends(get_current_user)):
                 logger.info(f"User data created for: {user_id}")
             else:
                 # Update last login
-                from firebase_admin import db
                 user_ref.update({
                     "last_login": int(datetime.utcnow().timestamp() * 1000)
                 })
@@ -753,7 +743,281 @@ async def verify_token(current_user: dict = Depends(get_current_user)):
         logger.error(f"Token verification error: {e}")
         raise HTTPException(status_code=500, detail="Token verification failed")
 
-# User routes
+# =================================================================
+# USER ENDPOINTS
+# =================================================================
+@app.get("/api/user/dashboard-data")
+async def get_dashboard_data(current_user: dict = Depends(get_current_user)):
+    """Get all dashboard data in a single optimized API call"""
+    try:
+        user_id = current_user['uid']
+        email = current_user.get('email')
+        
+        logger.info(f"Dashboard data request for user: {user_id}")
+        
+        # Initialize response with defaults
+        dashboard_data = {
+            "profile": {
+                "email": email,
+                "subscription": {
+                    "status": "trial",
+                    "plan": "Deneme",
+                    "daysRemaining": 7
+                },
+                "api_keys_set": False,
+                "bot_active": False,
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "account_balance": 0.0
+            },
+            "stats": {
+                "totalTrades": 0,
+                "totalPnl": 0.0,
+                "winRate": 0.0,
+                "botStartTime": None,
+                "lastTradeTime": None
+            },
+            "api_info": {
+                "hasKeys": False,
+                "maskedApiKey": None,
+                "useTestnet": False
+            },
+            "account": {
+                "totalBalance": 0.0,
+                "availableBalance": 0.0,
+                "unrealizedPnl": 0.0,
+                "message": "API keys required"
+            },
+            "bot_status": {
+                "user_id": user_id,
+                "is_running": False,
+                "symbol": None,
+                "position_side": None,
+                "status_message": "Bot not running",
+                "account_balance": 0.0,
+                "position_pnl": 0.0,
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "last_check_time": None
+            },
+            "firebase_available": firebase_initialized,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        if not firebase_initialized or not firebase_db:
+            logger.warning("Firebase unavailable, returning default dashboard data")
+            return dashboard_data
+        
+        try:
+            # Get user data from Firebase
+            user_ref = firebase_db.reference(f'users/{user_id}')
+            user_data = user_ref.get()
+            
+            if user_data:
+                # Profile data
+                subscription_status = "expired"
+                days_remaining = 0
+                
+                if user_data.get('subscription_expiry'):
+                    try:
+                        expiry_date = datetime.fromisoformat(user_data['subscription_expiry'].replace('Z', '+00:00'))
+                        now = datetime.now(timezone.utc)
+                        days_remaining = (expiry_date - now).days
+                        
+                        if days_remaining > 0:
+                            subscription_status = user_data.get('subscription_status', 'trial')
+                        else:
+                            subscription_status = "expired"
+                    except Exception as date_error:
+                        logger.error(f"Date parsing error: {date_error}")
+                        subscription_status = "trial"
+                        days_remaining = 7
+                
+                dashboard_data["profile"] = {
+                    "email": user_data.get("email", email),
+                    "full_name": user_data.get("full_name"),
+                    "subscription": {
+                        "status": subscription_status,
+                        "plan": "Premium" if subscription_status == "active" else "Deneme",
+                        "expiryDate": user_data.get("subscription_expiry"),
+                        "daysRemaining": max(0, days_remaining)
+                    },
+                    "api_keys_set": user_data.get("api_keys_set", False),
+                    "bot_active": user_data.get("bot_active", False),
+                    "total_trades": user_data.get("total_trades", 0),
+                    "total_pnl": user_data.get("total_pnl", 0.0),
+                    "account_balance": user_data.get("account_balance", 0.0)
+                }
+                
+                # Stats data
+                dashboard_data["stats"] = {
+                    "totalTrades": user_data.get("total_trades", 0),
+                    "totalPnl": user_data.get("total_pnl", 0.0),
+                    "winRate": user_data.get("win_rate", 0.0),
+                    "botStartTime": user_data.get("bot_start_time"),
+                    "lastTradeTime": user_data.get("last_trade_time")
+                }
+                
+                # API info
+                has_keys = user_data.get('api_keys_set', False)
+                masked_key = None
+                
+                if has_keys:
+                    encrypted_api_key = user_data.get('binance_api_key')
+                    if encrypted_api_key:
+                        try:
+                            from app.utils.crypto import decrypt_data
+                            api_key = decrypt_data(encrypted_api_key)
+                            if api_key and len(api_key) >= 8:
+                                masked_key = api_key[:8] + "..." + api_key[-4:]
+                        except:
+                            masked_key = "Encrypted API Key"
+                
+                dashboard_data["api_info"] = {
+                    "hasKeys": has_keys,
+                    "maskedApiKey": masked_key,
+                    "useTestnet": user_data.get('api_testnet', False)
+                }
+                
+                # Account data (if API keys exist)
+                if has_keys:
+                    try:
+                        from app.utils.crypto import decrypt_data
+                        from app.binance_client import BinanceClient
+                        
+                        encrypted_api_key = user_data.get('binance_api_key')
+                        encrypted_api_secret = user_data.get('binance_api_secret')
+                        
+                        if encrypted_api_key and encrypted_api_secret:
+                            api_key = decrypt_data(encrypted_api_key)
+                            api_secret = decrypt_data(encrypted_api_secret)
+                            
+                            if api_key and api_secret:
+                                client = BinanceClient(api_key, api_secret)
+                                await client.initialize()
+                                
+                                balance = await client.get_account_balance(use_cache=True)
+                                
+                                dashboard_data["account"] = {
+                                    "totalBalance": balance,
+                                    "availableBalance": balance,
+                                    "unrealizedPnl": 0.0,
+                                    "message": "Real Binance data"
+                                }
+                                
+                                await client.close()
+                    except Exception as account_error:
+                        logger.error(f"Account data error: {account_error}")
+                        dashboard_data["account"] = {
+                            "totalBalance": user_data.get("account_balance", 0.0),
+                            "availableBalance": user_data.get("account_balance", 0.0),
+                            "unrealizedPnl": 0.0,
+                            "message": f"Cached data (API error)"
+                        }
+                
+                # Bot status
+                try:
+                    from app.bot_manager import bot_manager
+                    bot_status = bot_manager.get_bot_status(user_id)
+                    dashboard_data["bot_status"] = bot_status
+                except Exception as bot_error:
+                    logger.error(f"Bot status error: {bot_error}")
+                    dashboard_data["bot_status"] = {
+                        "user_id": user_id,
+                        "is_running": user_data.get("bot_active", False),
+                        "symbol": user_data.get("bot_symbol"),
+                        "position_side": None,
+                        "status_message": "Bot service unavailable",
+                        "account_balance": user_data.get("account_balance", 0.0),
+                        "position_pnl": 0.0,
+                        "total_trades": user_data.get("total_trades", 0),
+                        "total_pnl": user_data.get("total_pnl", 0.0),
+                        "last_check_time": user_data.get("last_trade_time")
+                    }
+            else:
+                # Create user data if doesn't exist
+                logger.info(f"Creating user data for new user: {user_id}")
+                
+                trial_expiry = datetime.now(timezone.utc) + timedelta(days=7)
+                
+                new_user_data = {
+                    "email": email,
+                    "created_at": int(datetime.utcnow().timestamp() * 1000),
+                    "last_login": int(datetime.utcnow().timestamp() * 1000),
+                    "subscription_status": "trial",
+                    "subscription_expiry": trial_expiry.isoformat(),
+                    "api_keys_set": False,
+                    "bot_active": False,
+                    "total_trades": 0,
+                    "total_pnl": 0.0,
+                    "role": "user"
+                }
+                user_ref.set(new_user_data)
+                logger.info(f"User data created for: {user_id}")
+        
+        except Exception as db_error:
+            logger.error(f"Database error in dashboard data: {db_error}")
+            # Return defaults if database fails
+        
+        logger.info(f"Dashboard data successfully loaded for user: {user_id}")
+        return dashboard_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Dashboard data error: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # Return minimal fallback data
+        return {
+            "profile": {
+                "email": current_user.get('email', 'unknown@user.com'),
+                "subscription": {
+                    "status": "trial",
+                    "plan": "Deneme",
+                    "daysRemaining": 7
+                },
+                "api_keys_set": False,
+                "bot_active": False,
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "account_balance": 0.0
+            },
+            "stats": {
+                "totalTrades": 0,
+                "totalPnl": 0.0,
+                "winRate": 0.0,
+                "botStartTime": None,
+                "lastTradeTime": None
+            },
+            "api_info": {
+                "hasKeys": False,
+                "maskedApiKey": None,
+                "useTestnet": False
+            },
+            "account": {
+                "totalBalance": 0.0,
+                "availableBalance": 0.0,
+                "unrealizedPnl": 0.0,
+                "message": "Service error"
+            },
+            "bot_status": {
+                "user_id": current_user['uid'],
+                "is_running": False,
+                "symbol": None,
+                "position_side": None,
+                "status_message": "Service error",
+                "account_balance": 0.0,
+                "position_pnl": 0.0,
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "last_check_time": None
+            },
+            "firebase_available": False,
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
 @app.get("/api/user/profile")
 async def get_user_profile(current_user: dict = Depends(get_current_user)):
     """Get user profile with Firebase fallback"""
@@ -920,7 +1184,6 @@ async def get_account_data(current_user: dict = Depends(get_current_user)):
                             }
                             
                             # Update cache
-                            from firebase_admin import db
                             user_ref.update({
                                 "account_balance": balance,
                                 "last_balance_update": int(datetime.utcnow().timestamp() * 1000)
@@ -1188,8 +1451,6 @@ async def save_api_keys(request: dict, current_user: dict = Depends(get_current_
             encrypted_api_key = encrypt_data(api_key)
             encrypted_api_secret = encrypt_data(api_secret)
             
-            from firebase_admin import db
-            
             api_data = {
                 "binance_api_key": encrypted_api_key,
                 "binance_api_secret": encrypted_api_secret,
@@ -1456,7 +1717,6 @@ async def close_position(request: dict, current_user: dict = Depends(get_current
                     logger.error(f"Trade logging error: {log_error}")
                 
                 # Update user stats
-                from firebase_admin import db
                 current_trades = user_data.get('total_trades', 0)
                 current_pnl = user_data.get('total_pnl', 0.0)
                 
@@ -1486,7 +1746,15 @@ async def close_position(request: dict, current_user: dict = Depends(get_current
         logger.error(f"Position close error: {e}")
         raise HTTPException(status_code=500, detail="Position could not be closed")
 
-# Bot routes
+# Add the missing API keys endpoint
+@app.get("/api/user/api-keys")
+async def get_api_keys_status(current_user: dict = Depends(get_current_user)):
+    """Get API keys status - same as api-info for compatibility"""
+    return await get_api_info(current_user)
+
+# =================================================================
+# BOT ENDPOINTS
+# =================================================================
 @app.get("/api/bot/status")
 async def get_bot_status(current_user: dict = Depends(get_current_user)):
     """Get bot status"""
@@ -1668,7 +1936,6 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
                     raise HTTPException(status_code=400, detail=result["error"])
                 
                 # Update user data
-                from firebase_admin import db
                 user_ref.update({
                     "bot_active": True,
                     "bot_symbol": request.get('symbol', 'BTCUSDT'),
@@ -1720,7 +1987,6 @@ async def stop_bot(current_user: dict = Depends(get_current_user)):
         # Update user data
         if firebase_initialized and firebase_db:
             try:
-                from firebase_admin import db
                 user_ref = firebase_db.reference(f'users/{user_id}')
                 user_ref.update({
                     "bot_active": False,
@@ -1765,7 +2031,9 @@ async def get_metrics():
         logger.error(f"Metrics error: {e}")
         return PlainTextResponse("# Metrics not available")
 
-# Static routes - DÜZELTILMIŞ
+# =================================================================
+# STATIC ROUTES
+# =================================================================
 @app.get("/")
 async def read_root():
     return FileResponse("static/index.html", media_type="text/html")
