@@ -232,6 +232,17 @@ class BinanceClient:
         
         logger.info(f"BinanceClient created for user: {self.user_id}")
     
+    async def __aenter__(self):
+        """Context manager entry"""
+        await self.initialize()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - only close client connection"""
+        if self.client:
+            await self.client.close_connection()
+            self.client = None
+    
     async def initialize(self):
         """Client'ı başlat ve test et"""
         try:
@@ -410,7 +421,6 @@ class BinanceClient:
             logger.error(f"Error getting account balance for user {self.user_id}: {e}")
             return self._cached_balance
     
-    # Diğer metodlar aynı kalacak, sadece rate_limiter ve user_id eklenecek
     async def cancel_all_orders_safe(self, symbol: str):
         """Tüm açık emirleri güvenli şekilde iptal et"""
         try:
@@ -496,13 +506,13 @@ class BinanceClient:
             logger.error(f"Error setting leverage for user {self.user_id}: {e}")
             return False
     
-    async def close(self):
-        """Client bağlantısını kapat"""
+    async def close_connection(self):
+        """Sadece client bağlantısını kapat"""
         if self.client:
             try:
                 await self.client.close_connection()
-                logger.info(f"BinanceClient closed for user: {self.user_id}")
+                logger.info(f"BinanceClient connection closed for user: {self.user_id}")
             except Exception as e:
-                logger.error(f"Error closing BinanceClient for user {self.user_id}: {e}")
+                logger.error(f"Error closing BinanceClient connection for user {self.user_id}: {e}")
             finally:
                 self.client = None
