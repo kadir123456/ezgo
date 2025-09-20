@@ -1,6 +1,6 @@
 # app/binance_client.py
 import asyncio
-import json
+import math
 import time
 from typing import Dict, Set, Callable, Optional
 from collections import defaultdict, deque
@@ -199,7 +199,7 @@ class PriceManager:
 class BinanceClient:
     """
     Optimize edilmiş Binance Client
-    WebSocket price data + Rate limiting + Per-user caching
+    WebSocket price data + Rate limiting + Per-user caching + Public/Private separation
     """
     
     # Shared instances
@@ -213,6 +213,7 @@ class BinanceClient:
         self.is_testnet = settings.ENVIRONMENT == "TEST"
         self.client: AsyncClient | None = None
         self.exchange_info = None
+        self.is_public_only = not bool(self.api_key and self.api_secret)
         
         # Cache variables - kullanıcıya özel
         self._last_balance_check = 0
@@ -230,7 +231,7 @@ class BinanceClient:
         self.price_manager = BinanceClient._price_manager
         self.rate_limiter = BinanceClient._rate_limiter
         
-        logger.info(f"BinanceClient created for user: {self.user_id}")
+        logger.info(f"BinanceClient created for user: {self.user_id} (public_only: {self.is_public_only})")
     
     async def __aenter__(self):
         """Context manager entry"""
@@ -251,18 +252,31 @@ class BinanceClient:
             
             # User-specific client oluştur
             if self.client is None:
-                self.client = await AsyncClient.create(
-                    self.api_key, 
-                    self.api_secret, 
-                    testnet=self.is_testnet
-                )
-                
-                # Test connection
-                await self.rate_limiter.wait_if_needed('account', self.user_id)
-                await self.client.futures_account()
-                
-                logger.info(f"BinanceClient initialized for user: {self.user_id}")
-                return True
+                if self.is_public_only:
+                    # Public-only client (no API credentials needed)
+                    self.client = await AsyncClient.create(
+                        testnet=self.is_testnet
+                    )
+                    logger.info(f"Public BinanceClient initialized for user: {self.user_id}")
+                    return True
+                else:
+                    # Private client with API credentials
+                    if not self.api_key or not self.api_secret:
+                        logger.error(f"API credentials missing for user: {self.user_id}")
+                        return False
+                    
+                    self.client = await AsyncClient.create(
+                        self.api_key, 
+                        self.api_secret, 
+                        testnet=self.is_testnet
+                    )
+                    
+                    # Test connection with private endpoint
+                    await self.rate_limiter.wait_if_needed('account', self.user_id)
+                    await self.client.futures_account()
+                    
+                    logger.info(f"Private BinanceClient initialized for user: {self.user_id}")
+                    return True
                 
         except Exception as e:
             logger.error(f"Initialization failed for user {self.user_id}: {e}")
@@ -292,7 +306,11 @@ class BinanceClient:
             return None
     
     async def get_open_positions(self, symbol: str, use_cache: bool = True):
-        """Açık pozisyonları getir - cache desteği ile"""
+        """Açık pozisyonları getir - cache desteği ile (sadece private client'lar için)"""
+        if self.is_public_only:
+            logger.warning(f"Open positions requested for public-only client: {self.user_id}")
+            return []
+            
         try:
             current_time = time.time()
             cache_key = symbol
@@ -321,6 +339,10 @@ class BinanceClient:
     
     async def create_market_order_with_sl_tp(self, symbol: str, side: str, quantity: float, entry_price: float, price_precision: int):
         """Market order ile birlikte SL/TP oluştur"""
+        if self.is_public_only:
+            logger.error(f"Market order requested for public-only client: {self.user_id}")
+            return None
+            
         def format_price(price):
             return f"{price:.{price_precision}f}"
             
@@ -391,7 +413,11 @@ class BinanceClient:
             return None
     
     async def get_account_balance(self, use_cache: bool = True):
-        """Hesap bakiyesi getir - cache desteği ile"""
+        """Hesap bakiyesi getir - cache desteği ile (sadece private client'lar için)"""
+        if self.is_public_only:
+            logger.warning(f"Account balance requested for public-only client: {self.user_id}")
+            return 0.0
+            
         try:
             current_time = time.time()
             
@@ -423,6 +449,10 @@ class BinanceClient:
     
     async def cancel_all_orders_safe(self, symbol: str):
         """Tüm açık emirleri güvenli şekilde iptal et"""
+        if self.is_public_only:
+            logger.warning(f"Cancel orders requested for public-only client: {self.user_id}")
+            return False
+            
         try:
             await self.rate_limiter.wait_if_needed('order', self.user_id)
             open_orders = await self.client.futures_get_open_orders(symbol=symbol)
@@ -444,6 +474,10 @@ class BinanceClient:
     
     async def close_position(self, symbol: str, position_amt: float, side_to_close: str):
         """Pozisyon kapat"""
+        if self.is_public_only:
+            logger.error(f"Close position requested for public-only client: {self.user_id}")
+            return None
+            
         try:
             # Açık emirleri iptal et
             await self.cancel_all_orders_safe(symbol)
@@ -478,6 +512,10 @@ class BinanceClient:
     
     async def set_leverage(self, symbol: str, leverage: int):
         """Kaldıraç ayarla"""
+        if self.is_public_only:
+            logger.warning(f"Set leverage requested for public-only client: {self.user_id}")
+            return False
+            
         try:
             # Açık pozisyon kontrolü
             open_positions = await self.get_open_positions(symbol, use_cache=False)
@@ -505,6 +543,71 @@ class BinanceClient:
         except Exception as e:
             logger.error(f"Error setting leverage for user {self.user_id}: {e}")
             return False
+    
+    async def has_open_orders(self, symbol: str):
+        """Açık emir kontrolü"""
+        if self.is_public_only:
+            logger.warning(f"Open orders check requested for public-only client: {self.user_id}")
+            return False
+            
+        try:
+            await self.rate_limiter.wait_if_needed('order', self.user_id)
+            open_orders = await self.client.futures_get_open_orders(symbol=symbol)
+            return len(open_orders) > 0
+        except Exception as e:
+            logger.error(f"Error checking open orders for {symbol} - user {self.user_id}: {e}")
+            return False
+    
+    async def create_stop_and_limit_order(self, symbol: str, side: str, quantity: float, stop_price: float, limit_price: float):
+        """Stop ve limit emri oluştur"""
+        if self.is_public_only:
+            logger.error(f"Stop/limit order requested for public-only client: {self.user_id}")
+            return None
+            
+        try:
+            await self.rate_limiter.wait_if_needed('order', self.user_id)
+            
+            if side in ['SELL']:
+                # Stop loss veya take profit satış emri
+                order_type = 'STOP_MARKET' if stop_price < limit_price else 'TAKE_PROFIT_MARKET'
+            else:
+                # Stop loss veya take profit alış emri  
+                order_type = 'STOP_MARKET' if stop_price > limit_price else 'TAKE_PROFIT_MARKET'
+            
+            order = await self.client.futures_create_order(
+                symbol=symbol,
+                side=side,
+                type=order_type,
+                quantity=quantity,
+                stopPrice=stop_price,
+                timeInForce='GTE_GTC',
+                reduceOnly=True
+            )
+            
+            logger.info(f"{order_type} order created for user {self.user_id}: {symbol} {side} {quantity} @ {stop_price}")
+            return order
+            
+        except Exception as e:
+            logger.error(f"Stop/limit order creation failed for user {self.user_id}: {e}")
+            return None
+    
+    async def get_last_trade_pnl(self, symbol: str):
+        """Son işlemin PnL'ini al"""
+        if self.is_public_only:
+            logger.warning(f"Trade PnL requested for public-only client: {self.user_id}")
+            return 0.0
+            
+        try:
+            await self.rate_limiter.wait_if_needed('default', self.user_id)
+            trades = await self.client.futures_account_trades(symbol=symbol, limit=1)
+            
+            if trades:
+                return float(trades[-1]['realizedPnl'])
+            return 0.0
+            
+        except Exception as e:
+            logger.error(f"Error getting last trade PnL for {symbol} - user {self.user_id}: {e}")
+            return 0.0
     
     async def close_connection(self):
         """Sadece client bağlantısını kapat"""
