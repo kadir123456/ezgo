@@ -22,12 +22,62 @@ async function initializeFirebase() {
     }
 }
 
+// Enhanced token validation and refresh
+async function validateAndRefreshToken() {
+    try {
+        if (!currentUser) {
+            throw new Error('No current user');
+        }
+
+        // Check if current token is still valid
+        if (authToken) {
+            try {
+                // Decode token to check expiry
+                const payload = JSON.parse(atob(authToken.split('.')[1]));
+                const tokenExpiry = new Date(payload.exp * 1000);
+                const now = new Date();
+                const timeUntilExpiry = tokenExpiry - now;
+                
+                console.log(`🔑 Token expires in: ${Math.round(timeUntilExpiry / 1000 / 60)} minutes`);
+                
+                // If token expires in less than 5 minutes, refresh it
+                if (timeUntilExpiry < 5 * 60 * 1000) {
+                    console.log('🔄 Token expiring soon, refreshing preemptively...');
+                    const freshToken = await currentUser.getIdToken(true);
+                    authToken = freshToken;
+                    localStorage.setItem('authToken', freshToken);
+                    console.log('✅ Token refreshed preemptively');
+                }
+                
+                return authToken;
+                
+            } catch (tokenParseError) {
+                console.log('🔄 Invalid token format, getting fresh token...');
+            }
+        }
+        
+        // Get fresh token
+        console.log('🔄 Getting fresh token...');
+        const freshToken = await currentUser.getIdToken(true);
+        authToken = freshToken;
+        localStorage.setItem('authToken', freshToken);
+        console.log('✅ Fresh token obtained');
+        
+        return authToken;
+        
+    } catch (error) {
+        console.error('❌ Token validation/refresh failed:', error);
+        throw error;
+    }
+}
+
 // Get fresh Firebase token
 async function getFreshToken() {
     try {
         if (currentUser) {
             const token = await currentUser.getIdToken(true); // Force refresh
             authToken = token;
+            localStorage.setItem('authToken', token);
             console.log('Fresh auth token obtained');
             return token;
         }
@@ -44,22 +94,19 @@ function setupTokenRefresh() {
     
     tokenRefreshInterval = setInterval(async () => {
         try {
-            await getFreshToken();
+            await validateAndRefreshToken();
             console.log('Token refreshed automatically');
         } catch (error) {
             console.error('Auto token refresh failed:', error);
         }
-    }, 50 * 60 * 1000); // 50 minutes
+    }, 30 * 60 * 1000); // 30 minutes
 }
 
-// API call helper with authentication
+// Enhanced API call helper with better token handling
 async function makeAuthenticatedApiCall(endpoint, options = {}) {
     try {
-        // Ensure we have a fresh token
-        if (!authToken) {
-            console.log('No token available, getting fresh token...');
-            await getFreshToken();
-        }
+        // Always ensure fresh token before API call
+        await validateAndRefreshToken();
         
         if (!authToken) {
             throw new Error('Could not obtain authentication token');
@@ -83,10 +130,14 @@ async function makeAuthenticatedApiCall(endpoint, options = {}) {
         
         if (!response.ok) {
             if (response.status === 401) {
-                console.log('401 error, refreshing token and retrying...');
-                // Try to refresh token once
+                console.log('401 error, forcing fresh token and retrying...');
+                
                 try {
-                    await getFreshToken();
+                    // Force fresh token
+                    const freshToken = await currentUser.getIdToken(true);
+                    authToken = freshToken;
+                    localStorage.setItem('authToken', freshToken);
+                    
                     // Retry with new token
                     const retryOptions = {
                         ...mergedOptions,
@@ -95,7 +146,9 @@ async function makeAuthenticatedApiCall(endpoint, options = {}) {
                             'Authorization': `Bearer ${authToken}`
                         }
                     };
+                    
                     const retryResponse = await fetch(endpoint, retryOptions);
+                    
                     if (retryResponse.ok) {
                         const contentType = retryResponse.headers.get('content-type');
                         if (contentType && contentType.includes('application/json')) {
@@ -103,14 +156,18 @@ async function makeAuthenticatedApiCall(endpoint, options = {}) {
                         }
                         return await retryResponse.text();
                     } else {
-                        throw new Error(`HTTP ${retryResponse.status} after retry`);
+                        const errorData = await retryResponse.json().catch(() => ({}));
+                        throw new Error(errorData.error || errorData.detail || `HTTP ${retryResponse.status} after retry`);
                     }
                 } catch (refreshError) {
                     console.error('Token refresh and retry failed:', refreshError);
-                    throw new Error('Authentication failed - please login again');
+                    // If all fails, redirect to login
+                    window.location.href = '/login.html';
+                    return null;
                 }
             } else {
-                throw new Error(`HTTP ${response.status}`);
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || errorData.detail || `HTTP ${response.status}`);
             }
         }
 
@@ -446,25 +503,67 @@ async function loadPaymentAndServerInfo() {
     }
 }
 
-// Check API status
+// Enhanced API status check with better error handling
 async function checkApiStatus() {
     try {
-        console.log('Checking API status...');
+        console.log('🔑 Checking API status...');
         
-        const response = await makeAuthenticatedApiCall('/api/bot/api-status');
+        // Try to get API info first
+        const apiInfo = await makeAuthenticatedApiCall('/api/user/api-info');
+        console.log('API Info loaded:', apiInfo);
+        
+        // Update UI based on API info
+        updateApiKeyStatus(apiInfo);
+        updateBotControls(apiInfo.hasKeys);
+        
+        // If has keys, check connection status
+        if (apiInfo.hasKeys) {
+            try {
+                const apiStatus = await makeAuthenticatedApiCall('/api/bot/api-status');
+                updateConnectionStatus(apiStatus);
+            } catch (statusError) {
+                console.error('API status check failed:', statusError);
+                updateConnectionStatus({ hasApiKeys: true, isConnected: false, message: 'Connection check failed' });
+            }
+        }
+        
+        console.log('API status checked successfully');
+        
+    } catch (error) {
+        console.error('❌ API status check failed:', error);
+        
+        // Show API key form on error
+        updateApiKeyStatus({
+            hasKeys: false,
+            maskedApiKey: null,
+            useTestnet: false,
+            error: error.message
+        });
+        
+        updateBotControls(false);
+    }
+}
+
+// Update API key status in UI
+function updateApiKeyStatus(apiInfo) {
+    try {
+        const hasKeys = apiInfo && apiInfo.hasKeys === true;
+        
+        console.log('🔑 Updating API key status:', {
+            hasKeys,
+            maskedKey: apiInfo?.maskedApiKey,
+            testnet: apiInfo?.useTestnet
+        });
         
         const apiStatusIndicator = document.getElementById('api-status-indicator');
         const manageApiBtn = document.getElementById('manage-api-btn');
-        const tradingSettings = document.getElementById('trading-settings');
-        const controlButtons = document.getElementById('control-buttons');
-        const statusMessageText = document.getElementById('status-message-text');
         
-        if (response.hasApiKeys && response.isConnected) {
-            // API connected
+        if (hasKeys) {
+            // API keys exist
             if (apiStatusIndicator) {
                 apiStatusIndicator.innerHTML = `
                     <i class="fas fa-check-circle"></i>
-                    <span>API bağlantısı aktif</span>
+                    <span>API anahtarları mevcut</span>
                 `;
                 apiStatusIndicator.className = 'api-status-indicator connected';
             }
@@ -473,30 +572,6 @@ async function checkApiStatus() {
                 manageApiBtn.style.display = 'inline-flex';
                 manageApiBtn.textContent = 'API Ayarlarını Düzenle';
             }
-            
-            if (tradingSettings) tradingSettings.style.display = 'block';
-            if (controlButtons) controlButtons.style.display = 'grid';
-            if (statusMessageText) statusMessageText.textContent = 'Bot hazır. Ayarları yapılandırıp başlatabilirsiniz.';
-            
-            // Load trading pairs
-            await loadTradingPairs();
-            
-        } else if (response.hasApiKeys && !response.isConnected) {
-            // API error
-            if (apiStatusIndicator) {
-                apiStatusIndicator.innerHTML = `
-                    <i class="fas fa-times-circle"></i>
-                    <span>API bağlantı hatası</span>
-                `;
-                apiStatusIndicator.className = 'api-status-indicator error';
-            }
-            
-            if (manageApiBtn) {
-                manageApiBtn.style.display = 'inline-flex';
-                manageApiBtn.textContent = 'API Anahtarlarını Düzenle';
-            }
-            
-            if (statusMessageText) statusMessageText.textContent = response.message || 'API bağlantı hatası';
             
         } else {
             // No API keys
@@ -512,15 +587,57 @@ async function checkApiStatus() {
                 manageApiBtn.style.display = 'inline-flex';
                 manageApiBtn.textContent = 'API Anahtarlarını Ekle';
             }
-            
+        }
+        
+        // Update global state
+        window.userState = window.userState || {};
+        window.userState.hasApiKeys = hasKeys;
+        
+    } catch (error) {
+        console.error('❌ Error updating API key status:', error);
+    }
+}
+
+// Update connection status
+function updateConnectionStatus(apiStatus) {
+    try {
+        const statusMessageText = document.getElementById('status-message-text');
+        
+        if (apiStatus.hasApiKeys && apiStatus.isConnected) {
+            if (statusMessageText) statusMessageText.textContent = 'API bağlantısı aktif. Bot hazır.';
+            // Load trading pairs
+            loadTradingPairs();
+        } else if (apiStatus.hasApiKeys && !apiStatus.isConnected) {
+            if (statusMessageText) statusMessageText.textContent = apiStatus.message || 'API bağlantı hatası';
+        } else {
             if (statusMessageText) statusMessageText.textContent = 'Bot\'u çalıştırmak için API anahtarlarınızı eklemelisiniz.';
         }
         
-        console.log('API status checked successfully');
+    } catch (error) {
+        console.error('Error updating connection status:', error);
+    }
+}
+
+// Update bot controls visibility
+function updateBotControls(hasApiKeys) {
+    try {
+        const tradingSettings = document.getElementById('trading-settings');
+        const controlButtons = document.getElementById('control-buttons');
+        
+        if (hasApiKeys) {
+            // Show bot controls
+            if (tradingSettings) tradingSettings.style.display = 'block';
+            if (controlButtons) controlButtons.style.display = 'grid';
+        } else {
+            // Hide bot controls
+            if (tradingSettings) tradingSettings.style.display = 'none';
+            if (controlButtons) controlButtons.style.display = 'none';
+        }
+        
+        console.log('🤖 Bot controls updated:', { hasApiKeys, controlsVisible: hasApiKeys });
         
     } catch (error) {
-        console.error('Error checking API status:', error);
-        showNotification('API durumu kontrol edilemedi', 'error');
+        console.error('❌ Error updating bot controls:', error);
     }
 }
 
@@ -708,7 +825,7 @@ async function closePosition(symbol, positionSide) {
     }
 }
 
-// API Management
+// Enhanced API Management
 async function openApiModal() {
     const apiModal = document.getElementById('api-modal');
     if (apiModal) {
@@ -721,7 +838,7 @@ async function openApiModal() {
         const apiStatusIcon = document.getElementById('api-status-icon');
 
         if (apiKeyInput) apiKeyInput.value = '';
-        if (apiSecretInput) apiSecretInput.placeholder = 'API Secret'; // Varsayılan placeholder'a dön
+        if (apiSecretInput) apiSecretInput.placeholder = 'API Secret';
         if (apiTestnetCheckbox) apiTestnetCheckbox.checked = false;
         
         if (apiStatusIcon) {
@@ -731,11 +848,12 @@ async function openApiModal() {
         try {
             // API'den mevcut API key bilgilerini yükle
             const apiInfo = await makeAuthenticatedApiCall('/api/user/api-info');
+            console.log('Modal API info loaded:', apiInfo);
 
             // Başarılı olursa, alanları gelen verilerle doldur
             if (apiInfo.hasKeys) {
                 if (apiKeyInput) apiKeyInput.value = apiInfo.maskedApiKey || '';
-                if (apiTestnetCheckbox) apiTestnetCheckbox.checked = apiInfo.is_testnet || false; // Backend'den gelen is_testnet değerini kullan
+                if (apiTestnetCheckbox) apiTestnetCheckbox.checked = apiInfo.useTestnet || false;
                 if (apiSecretInput) apiSecretInput.placeholder = 'Mevcut secret korunuyor (değiştirmek için yeni girin)';
             }
             
@@ -747,7 +865,7 @@ async function openApiModal() {
         } catch (error) {
             // Hata olursa, kullanıcıya bilgi ver ve alanları temiz tut
             console.error('API keys load error:', error);
-            showNotification('API key bilgileri yüklenirken hata oluştu. Lütfen tekrar deneyin.', 'error');
+            showNotification('API key bilgileri yüklenirken hata oluştu.', 'warning');
             
             if (apiStatusIcon) {
                 apiStatusIcon.className = 'fas fa-times-circle api-status-icon-error';
@@ -769,7 +887,7 @@ function closeApiModal() {
     }
 }
 
-// Save API keys
+// Enhanced save API keys
 async function saveApiKeys(event) {
     event.preventDefault();
     
@@ -1028,6 +1146,7 @@ async function logout() {
         stopPeriodicUpdates();
         authToken = null;
         currentUser = null;
+        localStorage.removeItem('authToken');
         window.location.href = '/login.html';
     } catch (error) {
         console.error('Logout error:', error);
@@ -1148,7 +1267,7 @@ function setupEventListeners() {
     });
 }
 
-// Initialize dashboard
+// Enhanced dashboard initialization
 async function initializeDashboard() {
     try {
         console.log('Initializing dashboard...');
@@ -1165,19 +1284,20 @@ async function initializeDashboard() {
                 console.log('User authenticated:', user.uid);
                 
                 try {
-                    // Get Firebase ID token for backend authentication
-                    authToken = await user.getIdToken(true); // Force fresh token
+                    // Get fresh Firebase ID token for backend authentication
+                    authToken = await user.getIdToken(true);
+                    localStorage.setItem('authToken', authToken);
                     console.log('Auth token obtained');
                     
                     // Setup automatic token refresh
                     setupTokenRefresh();
                     
-                    // Load all data
+                    // Load all data with better error handling
                     await Promise.all([
-                        loadUserData(),
-                        loadAccountData(),
-                        loadPositions(),
-                        loadRecentActivity()
+                        loadUserData().catch(e => console.error('User data error:', e)),
+                        loadAccountData().catch(e => console.error('Account data error:', e)),
+                        loadPositions().catch(e => console.error('Positions error:', e)),
+                        loadRecentActivity().catch(e => console.error('Recent activity error:', e))
                     ]);
                     
                     // Check API status and bot status
@@ -1201,7 +1321,16 @@ async function initializeDashboard() {
                     
                 } catch (error) {
                     console.error('Dashboard data loading failed:', error);
-                    showNotification('Dashboard verileri yüklenemedi', 'error');
+                    showNotification('Dashboard verileri yüklenemedi, bazı özellikler kısıtlı olabilir', 'warning');
+                    
+                    // Still show dashboard even if some data fails
+                    const loadingScreen = document.getElementById('loading-screen');
+                    const dashboard = document.getElementById('dashboard');
+                    
+                    if (loadingScreen) loadingScreen.style.display = 'none';
+                    if (dashboard) dashboard.classList.remove('hidden');
+                    
+                    setupEventListeners();
                 }
             } else {
                 console.log('User not authenticated, redirecting to login...');
@@ -1209,6 +1338,7 @@ async function initializeDashboard() {
                     clearInterval(tokenRefreshInterval);
                     tokenRefreshInterval = null;
                 }
+                localStorage.removeItem('authToken');
                 window.location.href = '/login.html';
             }
         });
