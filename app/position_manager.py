@@ -363,5 +363,40 @@ class PositionManager:
                 "error": str(e)
             }
 
+    async def get_all_positions(self, user_id: str) -> List[dict]:
+        """
+        Kullanıcının tüm pozisyonlarını döndürür - HER ZAMAN ARRAY
+        """
+        try:
+            # Pozisyonları güncelle
+            await self._update_positions()
+            
+            # Pozisyon listesi oluştur
+            positions = []
+            
+            for symbol, position in self.active_positions.items():
+                try:
+                    positions.append({
+                        'symbol': position.get('symbol', ''),
+                        'side': position.get('side', 'UNKNOWN'),
+                        'positionAmt': str(position.get('quantity', 0)),
+                        'entryPrice': str(position.get('entryPrice', 0)),
+                        'markPrice': str(position.get('markPrice', 0)),
+                        'unRealizedProfit': position.get('unRealizedProfit', 0.0),
+                        'percentage': position.get('percentage', 0.0),
+                        'leverage': str(position.get('leverage', 1)),
+                        'marginType': position.get('marginType', 'CROSSED'),
+                        'positionSide': 'LONG' if position.get('positionAmt', 0) > 0 else 'SHORT'
+                    })
+                except Exception as pos_error:
+                    logger.error(f"Pozisyon formatlanırken hata - {symbol}: {pos_error}")
+                    continue
+            
+            return positions  # HER ZAMAN ARRAY DÖNDÜR
+            
+        except Exception as e:
+            logger.error(f"Pozisyonlar alınırken hata - user {user_id}: {e}")
+            return []  # HATA DURUMUNDA BOŞ ARRAY DÖNDÜR
+
 # Botun geri kalanı tarafından kullanılacak global nesne
 position_manager = PositionManager()
