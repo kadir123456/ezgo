@@ -411,12 +411,17 @@ async function loadAllDashboardData() {
         // ✅ TEK API ÇAĞRISI - 8 yerine 1 çağrı
         const data = await makeAuthenticatedApiCall('/api/user/dashboard-data');
         
-        // Update all UI elements
-        updateProfile(data.profile);
-        updateAccount(data.account);
-        updatePositions(data.positions);
-        updateStats(data.stats);
-        updateApiStatus(data.api_status);
+        // ✅ SAFE UPDATE: Null/undefined kontrolü ekle
+        if (data && typeof data === 'object') {
+            updateProfile(data.profile || {});
+            updateAccount(data.account || {});
+            updatePositions(data.positions || []);
+            updateStats(data.stats || {});
+            updateApiStatus(data.api_status || {});
+        } else {
+            console.warn('Invalid dashboard data received:', data);
+            throw new Error('Invalid response format');
+        }
         
         console.log('✅ Dashboard data loaded successfully with single API call');
         showNotification('Dashboard başarıyla yüklendi!', 'success', 2000);
@@ -441,84 +446,100 @@ async function loadFallbackData() {
     try {
         // Load only essential data individually if main endpoint fails
         const profile = await makeAuthenticatedApiCall('/api/user/profile');
-        updateProfile(profile);
+        updateProfile(profile || {});
         
         const stats = await makeAuthenticatedApiCall('/api/user/stats');
-        updateStats(stats);
+        updateStats(stats || {});
         
         showNotification('Temel veriler yüklendi (sınırlı mod)', 'warning');
         
     } catch (error) {
         console.error('Fallback data load failed:', error);
-        // Show empty state
+        // Show empty state with safe defaults
         updateProfile({ email: 'Kullanıcı', subscription: { status: 'trial' } });
         updateStats({ totalTrades: 0, totalPnl: 0, winRate: 0 });
     }
 }
 
-// Update profile UI
-function updateProfile(profile) {
+// ✅ FIXED: Update profile UI with safe null/undefined checks
+function updateProfile(profile = {}) {
     const userName = document.getElementById('user-name');
     const subscriptionText = document.getElementById('subscription-text');
     const subStatusBadge = document.getElementById('sub-status-badge');
     const daysRemaining = document.getElementById('days-remaining');
     const subscriptionNote = document.getElementById('subscription-note');
     
-    if (userName) userName.textContent = profile.email || 'Kullanıcı';
+    // ✅ SAFE: Email kontrolü
+    if (userName) {
+        userName.textContent = profile.email || currentUser?.email || 'Kullanıcı';
+    }
     
-    if (profile.subscription) {
-        if (subscriptionText) subscriptionText.textContent = profile.subscription.plan || 'Premium';
-        if (subStatusBadge) {
-            const statusSpan = subStatusBadge.querySelector('span');
-            if (statusSpan) statusSpan.textContent = profile.subscription.status === 'active' ? 'Aktif' : 'Deneme';
+    // ✅ SAFE: Subscription kontrolü
+    const subscription = profile.subscription || {};
+    
+    if (subscriptionText) {
+        subscriptionText.textContent = subscription.plan || 'Premium';
+    }
+    
+    if (subStatusBadge) {
+        const statusSpan = subStatusBadge.querySelector('span');
+        if (statusSpan) {
+            statusSpan.textContent = subscription.status === 'active' ? 'Aktif' : 'Deneme';
         }
+    }
+    
+    if (daysRemaining) {
+        const daysLeft = subscription.daysRemaining || 0;
+        daysRemaining.textContent = daysLeft > 0 ? `${daysLeft} gün kaldı` : 'Süresi dolmuş';
         
-        if (daysRemaining) {
-            const daysLeft = profile.subscription.daysRemaining || 0;
-            daysRemaining.textContent = daysLeft > 0 ? `${daysLeft} gün kaldı` : 'Süresi dolmuş';
-            
-            if (subscriptionNote) {
-                if (daysLeft <= 7 && daysLeft > 0) {
-                    subscriptionNote.textContent = 'Aboneliğiniz yakında sona erecek. Yenilemeyi unutmayın!';
-                    subscriptionNote.style.color = 'var(--warning-color)';
-                } else if (daysLeft <= 0) {
-                    subscriptionNote.textContent = 'Abonelik süresi dolmuş. Lütfen yenileyin.';
-                    subscriptionNote.style.color = 'var(--danger-color)';
-                } else {
-                    subscriptionNote.textContent = 'Aboneliğiniz aktif durumda.';
-                    subscriptionNote.style.color = 'var(--success-color)';
-                }
+        if (subscriptionNote) {
+            if (daysLeft <= 7 && daysLeft > 0) {
+                subscriptionNote.textContent = 'Aboneliğiniz yakında sona erecek. Yenilemeyi unutmayın!';
+                subscriptionNote.style.color = 'var(--warning-color, #d97706)';
+            } else if (daysLeft <= 0) {
+                subscriptionNote.textContent = 'Abonelik süresi dolmuş. Lütfen yenileyin.';
+                subscriptionNote.style.color = 'var(--danger-color, #dc2626)';
+            } else {
+                subscriptionNote.textContent = 'Aboneliğiniz aktif durumda.';
+                subscriptionNote.style.color = 'var(--success-color, #059669)';
             }
         }
     }
+    
+    console.log('✅ Profile updated safely:', {
+        email: profile.email || 'N/A',
+        subscription: subscription.status || 'N/A'
+    });
 }
 
-// Update account UI
-function updateAccount(account) {
+// ✅ SAFE: Update account UI
+function updateAccount(account = {}) {
     const totalBalance = document.getElementById('total-balance');
     const totalPnl = document.getElementById('total-pnl');
     
-    if (totalBalance) totalBalance.textContent = formatCurrency(account.totalBalance || 0);
+    if (totalBalance) {
+        totalBalance.textContent = formatCurrency(account.totalBalance || 0);
+    }
     
     if (totalPnl) {
         totalPnl.textContent = formatCurrency(account.unrealizedPnl || 0);
         const pnlValue = parseFloat(account.unrealizedPnl || 0);
         if (pnlValue > 0) {
-            totalPnl.style.color = 'var(--success-color)';
+            totalPnl.style.color = 'var(--success-color, #059669)';
         } else if (pnlValue < 0) {
-            totalPnl.style.color = 'var(--danger-color)';
+            totalPnl.style.color = 'var(--danger-color, #dc2626)';
         } else {
-            totalPnl.style.color = 'var(--text-primary)';
+            totalPnl.style.color = 'var(--text-primary, #1f2937)';
         }
     }
 }
 
-// Update positions UI
-function updatePositions(positions) {
+// ✅ SAFE: Update positions UI
+function updatePositions(positions = []) {
     const positionsContainer = document.getElementById('positions-container');
     if (!positionsContainer) return;
     
-    if (!positions || positions.length === 0) {
+    if (!Array.isArray(positions) || positions.length === 0) {
         positionsContainer.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-chart-line"></i>
@@ -530,35 +551,37 @@ function updatePositions(positions) {
     }
 
     const positionsHTML = positions.map(position => {
-        const pnlClass = position.unrealizedPnl >= 0 ? 'profit' : 'loss';
-        const sideClass = position.positionSide.toLowerCase();
+        // ✅ SAFE: Position data kontrolü
+        const unrealizedPnl = position.unrealizedPnl || 0;
+        const pnlClass = unrealizedPnl >= 0 ? 'profit' : 'loss';
+        const sideClass = (position.positionSide || '').toLowerCase();
         
         return `
             <div class="position-item">
                 <div class="position-header">
-                    <span class="position-symbol">${position.symbol}</span>
-                    <span class="position-side ${sideClass}">${position.positionSide}</span>
+                    <span class="position-symbol">${position.symbol || 'N/A'}</span>
+                    <span class="position-side ${sideClass}">${position.positionSide || 'N/A'}</span>
                 </div>
                 <div class="position-stats">
                     <div class="position-stat">
                         <div class="stat-label">Boyut</div>
-                        <div class="stat-value">${Math.abs(position.positionAmt)} ${position.symbol.replace('USDT', '')}</div>
+                        <div class="stat-value">${Math.abs(position.positionAmt || 0)} ${(position.symbol || '').replace('USDT', '')}</div>
                     </div>
                     <div class="position-stat">
                         <div class="stat-label">Giriş Fiyatı</div>
-                        <div class="stat-value">$${parseFloat(position.entryPrice).toFixed(2)}</div>
+                        <div class="stat-value">$${parseFloat(position.entryPrice || 0).toFixed(2)}</div>
                     </div>
                     <div class="position-stat">
                         <div class="stat-label">Güncel Fiyat</div>
-                        <div class="stat-value">$${parseFloat(position.markPrice).toFixed(2)}</div>
+                        <div class="stat-value">$${parseFloat(position.markPrice || 0).toFixed(2)}</div>
                     </div>
                     <div class="position-stat">
                         <div class="stat-label">P&L</div>
-                        <div class="stat-value ${pnlClass}">${formatCurrency(position.unrealizedPnl)}</div>
+                        <div class="stat-value ${pnlClass}">${formatCurrency(unrealizedPnl)}</div>
                     </div>
                 </div>
                 <div class="position-actions">
-                    <button class="btn btn-danger btn-sm" onclick="closePosition('${position.symbol}', '${position.positionSide}')">
+                    <button class="btn btn-danger btn-sm" onclick="closePosition('${position.symbol || ''}', '${position.positionSide || ''}')">
                         <i class="fas fa-times"></i> Pozisyonu Kapat
                     </button>
                 </div>
@@ -569,8 +592,8 @@ function updatePositions(positions) {
     positionsContainer.innerHTML = positionsHTML;
 }
 
-// Update stats UI
-function updateStats(stats) {
+// ✅ SAFE: Update stats UI
+function updateStats(stats = {}) {
     const totalTrades = document.getElementById('total-trades');
     const winRate = document.getElementById('win-rate');
     const totalPnl = document.getElementById('total-pnl');
@@ -581,17 +604,17 @@ function updateStats(stats) {
         totalPnl.textContent = formatCurrency(stats.totalPnl || 0);
         const pnlValue = parseFloat(stats.totalPnl || 0);
         if (pnlValue > 0) {
-            totalPnl.style.color = 'var(--success-color)';
+            totalPnl.style.color = 'var(--success-color, #059669)';
         } else if (pnlValue < 0) {
-            totalPnl.style.color = 'var(--danger-color)';
+            totalPnl.style.color = 'var(--danger-color, #dc2626)';
         } else {
-            totalPnl.style.color = 'var(--text-primary)';
+            totalPnl.style.color = 'var(--text-primary, #1f2937)';
         }
     }
 }
 
-// Update API status UI
-function updateApiStatus(apiStatus) {
+// ✅ SAFE: Update API status UI
+function updateApiStatus(apiStatus = {}) {
     const apiStatusIndicator = document.getElementById('api-status-indicator');
     const manageApiBtn = document.getElementById('manage-api-btn');
     const tradingSettings = document.getElementById('trading-settings');
@@ -662,12 +685,12 @@ async function loadTradingPairs() {
         const response = await makeAuthenticatedApiCall('/api/bot/trading-pairs');
         
         const symbolSelect = document.getElementById('symbol-select');
-        if (symbolSelect && response) {
+        if (symbolSelect && Array.isArray(response)) {
             symbolSelect.innerHTML = '';
             response.forEach(pair => {
                 const option = document.createElement('option');
-                option.value = pair.symbol;
-                option.textContent = `${pair.baseAsset}/${pair.quoteAsset}`;
+                option.value = pair.symbol || '';
+                option.textContent = `${pair.baseAsset || 'N/A'}/${pair.quoteAsset || 'N/A'}`;
                 symbolSelect.appendChild(option);
             });
             
@@ -699,7 +722,7 @@ async function loadPaymentAndServerInfo() {
         
         // Update server IPs
         const serverIpsText = document.getElementById('server-ips-text');
-        if (serverIpsText && appInfo.server_ips) {
+        if (serverIpsText && Array.isArray(appInfo.server_ips)) {
             serverIpsText.textContent = appInfo.server_ips.join(', ');
         }
         
@@ -1374,7 +1397,7 @@ async function initializeDashboard() {
             loadingScreen.innerHTML = `
                 <div class="loading-content">
                     <div class="loading-logo">
-                        <i class="fas fa-exclamation-triangle" style="color: var(--danger-color);"></i>
+                        <i class="fas fa-exclamation-triangle" style="color: #dc2626;"></i>
                         <span>Hata</span>
                     </div>
                     <p>Dashboard başlatılırken hata oluştu</p>
