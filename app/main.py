@@ -1881,10 +1881,11 @@ async def get_bot_api_status(current_user: dict = Depends(get_current_user)):
 
 @app.post("/api/bot/start")
 async def start_bot(request: dict, current_user: dict = Depends(get_current_user)):
-    """Start bot for user"""
+    """🚀 FIXED: Multi-timeframe bot başlatma"""
     try:
         user_id = current_user['uid']
-        logger.info(f"Bot start request from user: {user_id}")
+        logger.info(f"🚀 Bot start request from user: {user_id}")
+        logger.info(f"🔧 Request data: {request}")
         
         if not firebase_initialized or not firebase_db:
             raise HTTPException(status_code=500, detail="Database service unavailable")
@@ -1908,7 +1909,6 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
                         raise HTTPException(status_code=403, detail="Subscription expired")
                 except Exception as date_error:
                     logger.error(f"Date parsing error: {date_error}")
-                    # Continue with trial if date parsing fails
             
             if subscription_status not in ['trial', 'active']:
                 raise HTTPException(status_code=403, detail="Active subscription required")
@@ -1917,18 +1917,76 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
             if not user_data.get('api_keys_set'):
                 raise HTTPException(status_code=400, detail="Please add your API keys first")
             
+            # 🔧 FIXED: Enhanced request validation with detailed error messages
+            try:
+                # Symbol validation
+                symbol = request.get('symbol', 'BTCUSDT').upper()
+                if not symbol or len(symbol) < 6 or len(symbol) > 12:
+                    raise HTTPException(status_code=400, detail="Invalid symbol format")
+                
+                # 🔧 FIXED: Timeframe validation - tüm desteklenen timeframe'ler
+                timeframe = request.get('timeframe', '15m')
+                supported_timeframes = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d']
+                if timeframe not in supported_timeframes:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Unsupported timeframe: {timeframe}. Supported: {', '.join(supported_timeframes)}"
+                    )
+                
+                # Leverage validation
+                leverage = int(request.get('leverage', 10))
+                if leverage < 1 or leverage > 125:
+                    raise HTTPException(status_code=400, detail="Leverage must be between 1-125")
+                
+                # Order size validation  
+                order_size = float(request.get('order_size', 35.0))
+                if order_size < 10.0 or order_size > 10000.0:
+                    raise HTTPException(status_code=400, detail="Order size must be between 10-10000 USDT")
+                
+                # 🔧 FIXED: TP/SL validation - decimal precision support
+                stop_loss = float(request.get('stop_loss', 2.0))
+                take_profit = float(request.get('take_profit', 4.0))
+                
+                if stop_loss < 0.01 or stop_loss > 50.0:
+                    raise HTTPException(status_code=400, detail="Stop Loss must be between 0.01% - 50%")
+                
+                if take_profit < 0.01 or take_profit > 100.0:
+                    raise HTTPException(status_code=400, detail="Take Profit must be between 0.01% - 100%")
+                
+                # Logic validation
+                if stop_loss >= take_profit:
+                    raise HTTPException(status_code=400, detail="Take Profit must be higher than Stop Loss")
+                
+                logger.info(f"✅ Validation passed for user {user_id}:")
+                logger.info(f"   Symbol: {symbol}")
+                logger.info(f"   Timeframe: {timeframe}")
+                logger.info(f"   Leverage: {leverage}x")
+                logger.info(f"   Order Size: {order_size} USDT")
+                logger.info(f"   Stop Loss: {stop_loss}%")
+                logger.info(f"   Take Profit: {take_profit}%")
+                
+            except ValueError as ve:
+                raise HTTPException(status_code=400, detail=f"Invalid number format: {str(ve)}")
+            except HTTPException:
+                raise
+            except Exception as validation_error:
+                raise HTTPException(status_code=400, detail=f"Validation error: {str(validation_error)}")
+            
             # Try to start bot
             try:
                 from app.bot_manager import bot_manager, StartRequest
                 
+                # 🔧 FIXED: StartRequest ile validation
                 bot_settings = StartRequest(
-                    symbol=request.get('symbol', 'BTCUSDT'),
-                    timeframe=request.get('timeframe', '15m'),
-                    leverage=request.get('leverage', 10),
-                    order_size=request.get('order_size', 35.0),
-                    stop_loss=request.get('stop_loss', 2.0),
-                    take_profit=request.get('take_profit', 4.0)
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    leverage=leverage,
+                    order_size=order_size,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit
                 )
+                
+                logger.info(f"🔧 StartRequest created: {bot_settings}")
                 
                 result = await bot_manager.start_bot_for_user(user_id, bot_settings)
                 
@@ -1938,15 +1996,53 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
                 # Update user data
                 user_ref.update({
                     "bot_active": True,
-                    "bot_symbol": request.get('symbol', 'BTCUSDT'),
+                    "bot_symbol": symbol,
+                    "bot_timeframe": timeframe,
+                    "bot_leverage": leverage,
+                    "bot_order_size": order_size,
+                    "bot_stop_loss": stop_loss,
+                    "bot_take_profit": take_profit,
                     "bot_start_time": int(datetime.utcnow().timestamp() * 1000)
                 })
                 
+                logger.info(f"✅ {timeframe} bot started successfully for user {user_id}")
+                
                 return {
                     "success": True,
-                    "message": "Bot started successfully",
-                    "bot_status": result.get("status", {})
+                    "message": f"✅ {timeframe} Bot başarıyla başlatıldı",
+                    "settings": {
+                        "symbol": symbol,
+                        "timeframe": timeframe,
+                        "leverage": leverage,
+                        "order_size": order_size,
+                        "stop_loss": stop_loss,
+                        "take_profit": take_profit
+                    },
+                    "bot_status": result.get("status", {}),
+                    "strategy_info": {
+                        "timeframe": timeframe,
+                        "expected_signals": "Every candle close",
+                        "api_safe": True,
+                        "custom_tp_sl": True
+                    }
                 }
+                
+            except Exception as bot_error:
+                logger.error(f"❌ Bot manager error: {bot_error}")
+                return {
+                    "success": False,
+                    "message": f"Bot service error: {str(bot_error)}"
+                }
+                
+        except Exception as db_error:
+            logger.error(f"❌ Database error in bot start: {db_error}")
+            raise HTTPException(status_code=500, detail="Bot start failed due to database error")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Bot start error: {e}")
+        raise HTTPException(status_code=500, detail=f"Bot could not be started: {str(e)}")
                 
             except Exception as bot_error:
                 logger.error(f"Bot manager error: {bot_error}")
