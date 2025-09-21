@@ -527,6 +527,11 @@ async function checkApiStatus() {
             }
         }
         
+        // Load trading pairs after successful API check
+        if (apiInfo.hasKeys) {
+            await loadTradingPairs();
+        }
+        
         console.log('API status checked successfully');
         
     } catch (error) {
@@ -605,8 +610,6 @@ function updateConnectionStatus(apiStatus) {
         
         if (apiStatus.hasApiKeys && apiStatus.isConnected) {
             if (statusMessageText) statusMessageText.textContent = 'API bağlantısı aktif. Bot hazır.';
-            // Load trading pairs
-            loadTradingPairs();
         } else if (apiStatus.hasApiKeys && !apiStatus.isConnected) {
             if (statusMessageText) statusMessageText.textContent = apiStatus.message || 'API bağlantı hatası';
         } else {
@@ -641,27 +644,57 @@ function updateBotControls(hasApiKeys) {
     }
 }
 
-// Load trading pairs
+// 🔧 FIXED: Load trading pairs with new response format
 async function loadTradingPairs() {
     try {
+        console.log('Loading trading pairs...');
+        
         const response = await makeAuthenticatedApiCall('/api/trading/pairs');
+        console.log('Trading pairs response:', response);
         
         const symbolSelect = document.getElementById('symbol-select');
         if (symbolSelect && response) {
             symbolSelect.innerHTML = '';
-            response.forEach(pair => {
-                const option = document.createElement('option');
-                option.value = pair.symbol;
-                option.textContent = `${pair.baseAsset}/${pair.quoteAsset}`;
-                symbolSelect.appendChild(option);
-            });
             
-            // Set default to BTCUSDT
-            symbolSelect.value = 'BTCUSDT';
+            // 🔧 FIX: Handle new response format - extract pairs array
+            const pairs = response.pairs || response || [];
+            
+            if (Array.isArray(pairs)) {
+                pairs.forEach(pair => {
+                    const option = document.createElement('option');
+                    option.value = pair.symbol;
+                    option.textContent = `${pair.baseAsset}/${pair.quoteAsset}`;
+                    symbolSelect.appendChild(option);
+                });
+                
+                // Set default to BTCUSDT
+                symbolSelect.value = 'BTCUSDT';
+                
+                console.log(`✅ Loaded ${pairs.length} trading pairs successfully`);
+            } else {
+                console.error('❌ Trading pairs data is not an array:', response);
+                showNotification('Coin listesi yüklenemedi - format hatası', 'error');
+            }
         }
         
     } catch (error) {
-        console.error('Error loading trading pairs:', error);
+        console.error('❌ Error loading trading pairs:', error);
+        showNotification('Coin listesi yüklenemedi', 'error');
+        
+        // Fallback: Add default pairs if API fails
+        const symbolSelect = document.getElementById('symbol-select');
+        if (symbolSelect) {
+            symbolSelect.innerHTML = `
+                <option value="BTCUSDT">BTC/USDT</option>
+                <option value="ETHUSDT">ETH/USDT</option>
+                <option value="BNBUSDT">BNB/USDT</option>
+                <option value="ADAUSDT">ADA/USDT</option>
+                <option value="DOTUSDT">DOT/USDT</option>
+                <option value="LINKUSDT">LINK/USDT</option>
+            `;
+            symbolSelect.value = 'BTCUSDT';
+            console.log('📌 Fallback trading pairs loaded');
+        }
     }
 }
 
