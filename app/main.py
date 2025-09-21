@@ -2084,7 +2084,7 @@ async def stop_bot(current_user: dict = Depends(get_current_user)):
 
 # CRITICAL FIX: Trading pairs endpoint - Dashboard.js compatible format
 @app.get("/api/trading/pairs")
-async def get_trading_pairs()::
+async def get_trading_pairs():
     """Get supported trading pairs - Dashboard.js compatible format"""
     # Return simple array format that dashboard.js expects
     pairs = [
