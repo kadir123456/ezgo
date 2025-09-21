@@ -1753,11 +1753,11 @@ async def get_api_keys_status(current_user: dict = Depends(get_current_user)):
     return await get_api_info(current_user)
 
 # =================================================================
-# BOT ENDPOINTS - FIXED: Multi-timeframe & Custom TP/SL
+# BOT ENDPOINTS - FIXED: Dashboard.js uyumlu format
 # =================================================================
 @app.get("/api/bot/status")
 async def get_bot_status(current_user: dict = Depends(get_current_user)):
-    """📊 Bot status - Multi-timeframe support"""
+    """Bot status endpoint"""
     try:
         user_id = current_user['uid']
         
@@ -1766,30 +1766,12 @@ async def get_bot_status(current_user: dict = Depends(get_current_user)):
             from app.bot_manager import bot_manager
             status = bot_manager.get_bot_status(user_id)
             
-            # 🔧 FIXED: Enhanced status with timeframe info
-            enhanced_status = {
-                **status,
-                "timeframe_info": {
-                    "current_timeframe": status.get("timeframe", "15m"),
-                    "strategy_type": status.get("strategy_type", "swing"),
-                    "supported_timeframes": ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"],
-                    "candle_sync": True,
-                    "api_safe": True
-                },
-                "tp_sl_info": {
-                    "stop_loss": status.get("stop_loss", 0),
-                    "take_profit": status.get("take_profit", 0),
-                    "custom_values": True,
-                    "decimal_precision": True
-                }
-            }
-            
             return {
                 "success": True,
-                "status": enhanced_status
+                "status": status
             }
         except Exception as bot_error:
-            logger.error(f"❌ Bot manager error: {bot_error}")
+            logger.error(f"Bot manager error: {bot_error}")
             # Return fallback status
             return {
                 "success": True,
@@ -1813,7 +1795,7 @@ async def get_bot_status(current_user: dict = Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Bot status error: {e}")
+        logger.error(f"Bot status error: {e}")
         raise HTTPException(status_code=500, detail="Bot status could not be retrieved")
 
 @app.get("/api/bot/api-status")
@@ -1903,11 +1885,11 @@ async def get_bot_api_status(current_user: dict = Depends(get_current_user)):
 
 @app.post("/api/bot/start")
 async def start_bot(request: dict, current_user: dict = Depends(get_current_user)):
-    """🚀 FIXED: Multi-timeframe bot başlatma"""
+    """Start bot for user - Enhanced validation"""
     try:
         user_id = current_user['uid']
-        logger.info(f"🚀 Bot start request from user: {user_id}")
-        logger.info(f"🔧 Request data: {request}")
+        logger.info(f"Bot start request from user: {user_id}")
+        logger.info(f"Request data: {request}")
         
         if not firebase_initialized or not firebase_db:
             raise HTTPException(status_code=500, detail="Database service unavailable")
@@ -1939,14 +1921,14 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
             if not user_data.get('api_keys_set'):
                 raise HTTPException(status_code=400, detail="Please add your API keys first")
             
-            # 🔧 FIXED: Enhanced request validation with detailed error messages
+            # Enhanced request validation
             try:
                 # Symbol validation
                 symbol = request.get('symbol', 'BTCUSDT').upper()
                 if not symbol or len(symbol) < 6 or len(symbol) > 12:
                     raise HTTPException(status_code=400, detail="Invalid symbol format")
                 
-                # 🔧 FIXED: Timeframe validation - tüm desteklenen timeframe'ler
+                # Timeframe validation - all supported timeframes
                 timeframe = request.get('timeframe', '15m')
                 supported_timeframes = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d']
                 if timeframe not in supported_timeframes:
@@ -1965,7 +1947,7 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
                 if order_size < 10.0 or order_size > 10000.0:
                     raise HTTPException(status_code=400, detail="Order size must be between 10-10000 USDT")
                 
-                # 🔧 FIXED: TP/SL validation - decimal precision support
+                # TP/SL validation - decimal precision support
                 stop_loss = float(request.get('stop_loss', 2.0))
                 take_profit = float(request.get('take_profit', 4.0))
                 
@@ -1979,7 +1961,7 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
                 if stop_loss >= take_profit:
                     raise HTTPException(status_code=400, detail="Take Profit must be higher than Stop Loss")
                 
-                logger.info(f"✅ Validation passed for user {user_id}:")
+                logger.info(f"Validation passed for user {user_id}:")
                 logger.info(f"   Symbol: {symbol}")
                 logger.info(f"   Timeframe: {timeframe}")
                 logger.info(f"   Leverage: {leverage}x")
@@ -1998,7 +1980,7 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
             try:
                 from app.bot_manager import bot_manager, StartRequest
                 
-                # 🔧 FIXED: StartRequest ile validation
+                # StartRequest ile validation
                 bot_settings = StartRequest(
                     symbol=symbol,
                     timeframe=timeframe,
@@ -2008,7 +1990,7 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
                     take_profit=take_profit
                 )
                 
-                logger.info(f"🔧 StartRequest created: {bot_settings}")
+                logger.info(f"StartRequest created: {bot_settings}")
                 
                 result = await bot_manager.start_bot_for_user(user_id, bot_settings)
                 
@@ -2027,11 +2009,11 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
                     "bot_start_time": int(datetime.utcnow().timestamp() * 1000)
                 })
                 
-                logger.info(f"✅ {timeframe} bot started successfully for user {user_id}")
+                logger.info(f"{timeframe} bot started successfully for user {user_id}")
                 
                 return {
                     "success": True,
-                    "message": f"✅ {timeframe} Bot başarıyla başlatıldı",
+                    "message": f"{timeframe} Bot başarıyla başlatıldı",
                     "settings": {
                         "symbol": symbol,
                         "timeframe": timeframe,
@@ -2040,30 +2022,24 @@ async def start_bot(request: dict, current_user: dict = Depends(get_current_user
                         "stop_loss": stop_loss,
                         "take_profit": take_profit
                     },
-                    "bot_status": result.get("status", {}),
-                    "strategy_info": {
-                        "timeframe": timeframe,
-                        "expected_signals": "Every candle close",
-                        "api_safe": True,
-                        "custom_tp_sl": True
-                    }
+                    "bot_status": result.get("status", {})
                 }
                 
             except Exception as bot_error:
-                logger.error(f"❌ Bot manager error: {bot_error}")
+                logger.error(f"Bot manager error: {bot_error}")
                 return {
                     "success": False,
                     "message": f"Bot service error: {str(bot_error)}"
                 }
                 
         except Exception as db_error:
-            logger.error(f"❌ Database error in bot start: {db_error}")
+            logger.error(f"Database error in bot start: {db_error}")
             raise HTTPException(status_code=500, detail="Bot start failed due to database error")
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Bot start error: {e}")
+        logger.error(f"Bot start error: {e}")
         raise HTTPException(status_code=500, detail=f"Bot could not be started: {str(e)}")
 
 @app.post("/api/bot/stop")
@@ -2106,80 +2082,22 @@ async def stop_bot(current_user: dict = Depends(get_current_user)):
         logger.error(f"Bot stop error: {e}")
         raise HTTPException(status_code=500, detail=f"Bot could not be stopped: {str(e)}")
 
+# CRITICAL FIX: Trading pairs endpoint - Dashboard.js compatible format
 @app.get("/api/trading/pairs")
 async def get_trading_pairs(current_user: dict = Depends(get_current_user)):
-    """💰 Get supported trading pairs with timeframe info"""
+    """Get supported trading pairs - Dashboard.js compatible format"""
+    # Return simple array format that dashboard.js expects
     pairs = [
-        {
-            "symbol": "BTCUSDT", 
-            "baseAsset": "BTC", 
-            "quoteAsset": "USDT",
-            "recommended_timeframes": ["5m", "15m", "30m", "1h"],
-            "min_tp_sl": 0.01
-        },
-        {
-            "symbol": "ETHUSDT", 
-            "baseAsset": "ETH", 
-            "quoteAsset": "USDT",
-            "recommended_timeframes": ["5m", "15m", "30m", "1h"],
-            "min_tp_sl": 0.01
-        },
-        {
-            "symbol": "BNBUSDT", 
-            "baseAsset": "BNB", 
-            "quoteAsset": "USDT",
-            "recommended_timeframes": ["15m", "30m", "1h"],
-            "min_tp_sl": 0.01
-        },
-        {
-            "symbol": "ADAUSDT", 
-            "baseAsset": "ADA", 
-            "quoteAsset": "USDT",
-            "recommended_timeframes": ["15m", "30m", "1h", "4h"],
-            "min_tp_sl": 0.01
-        },
-        {
-            "symbol": "DOTUSDT", 
-            "baseAsset": "DOT", 
-            "quoteAsset": "USDT",
-            "recommended_timeframes": ["15m", "30m", "1h", "4h"],
-            "min_tp_sl": 0.01
-        },
-        {
-            "symbol": "LINKUSDT", 
-            "baseAsset": "LINK", 
-            "quoteAsset": "USDT",
-            "recommended_timeframes": ["15m", "30m", "1h", "4h"],
-            "min_tp_sl": 0.01
-        }
+        {"symbol": "BTCUSDT", "baseAsset": "BTC", "quoteAsset": "USDT"},
+        {"symbol": "ETHUSDT", "baseAsset": "ETH", "quoteAsset": "USDT"},
+        {"symbol": "BNBUSDT", "baseAsset": "BNB", "quoteAsset": "USDT"},
+        {"symbol": "ADAUSDT", "baseAsset": "ADA", "quoteAsset": "USDT"},
+        {"symbol": "DOTUSDT", "baseAsset": "DOT", "quoteAsset": "USDT"},
+        {"symbol": "LINKUSDT", "baseAsset": "LINK", "quoteAsset": "USDT"}
     ]
     
-    return {
-        "pairs": pairs,
-        "supported_timeframes": {
-            "1m": {"name": "1 Minute", "strategy": "Ultra Scalping", "risk": "HIGH"},
-            "3m": {"name": "3 Minutes", "strategy": "Scalping", "risk": "HIGH"},
-            "5m": {"name": "5 Minutes", "strategy": "Scalping", "risk": "MEDIUM-HIGH"},
-            "15m": {"name": "15 Minutes", "strategy": "Swing Trading", "risk": "MEDIUM"},
-            "30m": {"name": "30 Minutes", "strategy": "Trend Following", "risk": "MEDIUM"},
-            "1h": {"name": "1 Hour", "strategy": "Position Trading", "risk": "MEDIUM-LOW"},
-            "2h": {"name": "2 Hours", "strategy": "Position Trading", "risk": "LOW"},
-            "4h": {"name": "4 Hours", "strategy": "Major Trends", "risk": "LOW"},
-            "6h": {"name": "6 Hours", "strategy": "Major Trends", "risk": "LOW"},
-            "8h": {"name": "8 Hours", "strategy": "Major Trends", "risk": "LOW"},
-            "12h": {"name": "12 Hours", "strategy": "Major Trends", "risk": "LOW"},
-            "1d": {"name": "1 Day", "strategy": "Long Term", "risk": "LOW"}
-        },
-        "tp_sl_ranges": {
-            "stop_loss": {"min": 0.01, "max": 50.0, "unit": "%"},
-            "take_profit": {"min": 0.01, "max": 100.0, "unit": "%"},
-            "recommended": {
-                "scalping": {"sl": "0.1-0.5%", "tp": "0.2-1.0%"},
-                "swing": {"sl": "0.5-2.0%", "tp": "1.0-5.0%"},
-                "position": {"sl": "1.0-5.0%", "tp": "3.0-15.0%"}
-            }
-        }
-    }
+    # Return direct array for dashboard.js compatibility
+    return pairs
 
 # Metrics endpoint
 @app.get("/metrics")
