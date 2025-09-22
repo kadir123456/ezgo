@@ -1,4 +1,4 @@
-# app/bot_core.py - OPTIMIZED: Hızlı Sinyal Detection + Rate Limit Optimize
+# app/bot_core.py - OPTIMIZED FULL VERSION: Günde 5-8 Sinyal + Hızlı Detection
 import asyncio
 import json
 import math
@@ -16,8 +16,8 @@ logger = get_logger("bot_core")
 class BotCore:
     def __init__(self, user_id: str, api_key: str, api_secret: str, bot_settings: dict):
         """
-        🚀 OPTIMIZE EDİLMİŞ Bot Core
-        Hızlı sinyal detection + Minimum API calls + Maximum performance
+        🚀 OPTIMIZE EDİLMİŞ Bot Core - FULL VERSION
+        Günde 5-8 sinyal + Real-time breakout detection + Minimum API calls
         """
         self.user_id = user_id
         self.api_key = api_key
@@ -118,7 +118,7 @@ class BotCore:
         logger.info(f"⚡ Fast intervals: API={self.api_call_interval}s, Kline={self.kline_fetch_interval}s")
 
     def _get_timeframe_seconds(self, timeframe: str) -> int:
-        """Timeframe'i saniyeye çevir - aynı"""
+        """Timeframe'i saniyeye çevir"""
         timeframe_map = {
             "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800,
             "1h": 3600, "2h": 7200, "4h": 14400, "6h": 21600, 
@@ -167,7 +167,7 @@ class BotCore:
             await self.stop()
 
     async def _initialize_binance_client(self):
-        """Client başlatma - aynı"""
+        """Client başlatma"""
         try:
             init_result = await self.binance_client.initialize()
             if not init_result:
@@ -177,7 +177,7 @@ class BotCore:
             raise Exception(f"BinanceClient initialization failed: {e}")
 
     async def _subscribe_to_price_feed(self):
-        """🔌 WebSocket subscription - aynı"""
+        """🔌 WebSocket subscription (NO API CALLS)"""
         try:
             await self.binance_client.subscribe_to_symbol(self.status["symbol"])
             logger.info(f"✅ WebSocket subscribed for {self.status['symbol']} - user {self.user_id}")
@@ -186,7 +186,7 @@ class BotCore:
             raise
 
     async def _one_time_setup(self):
-        """🔧 One-time setup - aynı"""
+        """🔧 One-time setup (minimal API calls)"""
         try:
             # Symbol info (ONCE)
             symbol_info = await self.binance_client.get_symbol_info(self.status["symbol"])
@@ -219,7 +219,7 @@ class BotCore:
             logger.error(f"One-time setup failed: {e}")
 
     async def _check_existing_position(self):
-        """Mevcut pozisyon kontrolü - aynı"""
+        """Mevcut pozisyon kontrolü (ONCE)"""
         try:
             open_positions = await self.binance_client.get_open_positions(self.status["symbol"], use_cache=False)
             if open_positions:
@@ -387,7 +387,7 @@ class BotCore:
                 await asyncio.sleep(30)  # 60 → 30
 
     def _calculate_next_candle_close(self, current_time_ms: int) -> int:
-        """Bir sonraki mum kapanışını hesapla - aynı"""
+        """Bir sonraki mum kapanışını hesapla"""
         try:
             timeframe_ms = self.timeframe_seconds * 1000
             current_candle_start = (current_time_ms // timeframe_ms) * timeframe_ms
@@ -402,7 +402,7 @@ class BotCore:
         try:
             logger.info(f"🚀 OPTIMIZED {self.status['timeframe']} candle fetch for user {self.user_id}")
             
-            # Son 2 mumu al (current + previous) - aynı
+            # Son 2 mumu al (current + previous)
             recent_klines = await self.binance_client.get_historical_klines(
                 self.status["symbol"],
                 self.status["timeframe"],
@@ -656,7 +656,142 @@ class BotCore:
             await self.binance_client.cancel_all_orders_safe(symbol)
             return None
 
-    # ... (Diğer metodlar aynı kalacak, sadece log mesajlarına "OPTIMIZED" eklenecek)
+    async def _flip_position(self, new_signal: str, current_price: float):
+        """🔄 OPTIMIZE EDİLMİŞ Position flipping"""
+        try:
+            logger.info(f"🔄 OPTIMIZED flipping position: {self.status['position_side']} -> {new_signal}")
+            
+            close_result = await self._close_position("OPTIMIZED_STRATEGY_FLIP")
+            if close_result:
+                await asyncio.sleep(0.8)  # 1 → 0.8 (hızlandırıldı)
+                await self._open_position(new_signal, current_price)
+            
+        except Exception as e:
+            logger.error(f"❌ OPTIMIZED position flip error: {e}")
+
+    async def _close_position(self, reason: str = "SIGNAL"):
+        """🔚 OPTIMIZE EDİLMİŞ Position closing"""
+        try:
+            if not self.status["position_side"]:
+                return False
+                
+            logger.info(f"🔚 OPTIMIZED closing {self.status['position_side']} position - Reason: {reason}")
+            
+            # Get current position
+            open_positions = await self.binance_client.get_open_positions(self.status["symbol"], use_cache=False)
+            if not open_positions:
+                self.status["position_side"] = None
+                return True
+            
+            position = open_positions[0]
+            position_amt = float(position.get('positionAmt', 0))
+            
+            if abs(position_amt) == 0:
+                self.status["position_side"] = None
+                return True
+            
+            # Close position
+            side_to_close = 'SELL' if position_amt > 0 else 'BUY'
+            
+            close_result = await self.binance_client.close_position(
+                self.status["symbol"], 
+                position_amt, 
+                side_to_close
+            )
+            
+            if close_result:
+                # Calculate PnL
+                pnl = await self.binance_client.get_last_trade_pnl(self.status["symbol"])
+                
+                # Update status
+                self.status.update({
+                    "position_side": None,
+                    "entry_price": 0.0,
+                    "unrealized_pnl": 0.0,
+                    "total_pnl": self.status["total_pnl"] + pnl,
+                    "status_message": f"🚀 OPTIMIZED pozisyon kapatıldı - PnL: ${pnl:.2f}"
+                })
+                
+                # Track losses (OPTIMIZE EDİLMİŞ)
+                if pnl < 0:
+                    self.consecutive_losses += 1
+                else:
+                    self.consecutive_losses = 0
+                
+                # Log trade
+                await self._log_trade({
+                    "action": "OPTIMIZED_CLOSE",
+                    "reason": reason,
+                    "pnl": pnl,
+                    "price": self.current_price,
+                    "strategy": f"OPTIMIZED_{self.status['timeframe']}_{self.status['strategy_type']}",
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+                
+                logger.info(f"🚀 OPTIMIZED position closed - PnL: ${pnl:.2f}")
+                return True
+            else:
+                logger.error(f"❌ Failed to close OPTIMIZED position")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ OPTIMIZED position closing error: {e}")
+            return False
+
+    async def _check_exit_conditions(self):
+        """🔧 OPTIMIZE EDİLMİŞ USER TP/SL Exit conditions"""
+        try:
+            if not self.status["position_side"] or not self.current_price or not self.status["entry_price"]:
+                return
+            
+            entry_price = self.status["entry_price"]
+            current_price = self.current_price
+            position_side = self.status["position_side"]
+            
+            # USER TP/SL values
+            user_stop_loss = self.status["stop_loss"]
+            user_take_profit = self.status["take_profit"]
+            
+            # Calculate percentage
+            if position_side == "LONG":
+                pct_change = ((current_price - entry_price) / entry_price) * 100
+            else:  # SHORT
+                pct_change = ((entry_price - current_price) / entry_price) * 100
+            
+            # USER Stop loss check
+            if pct_change <= -user_stop_loss:
+                logger.info(f"🛑 OPTIMIZED USER Stop loss: {pct_change:.2f}% (Limit: -{user_stop_loss}%)")
+                await self._close_position("OPTIMIZED_USER_STOP_LOSS")
+                return
+            
+            # USER Take profit check
+            if pct_change >= user_take_profit:
+                logger.info(f"🎯 OPTIMIZED USER Take profit: {pct_change:.2f}% (Target: +{user_take_profit}%)")
+                await self._close_position("OPTIMIZED_USER_TAKE_PROFIT")
+                return
+                
+        except Exception as e:
+            logger.error(f"❌ OPTIMIZED exit conditions error: {e}")
+
+    async def _calculate_realtime_pnl(self):
+        """💰 OPTIMIZE EDİLMİŞ Real-time PnL calculation (NO API CALLS)"""
+        try:
+            if self.status["position_side"] and self.current_price and self.status["entry_price"]:
+                entry_price = self.status["entry_price"]
+                current_price = self.current_price
+                order_size = self.status["order_size"]
+                leverage = self.status["leverage"]
+                
+                if self.status["position_side"] == "LONG":
+                    pnl_percentage = ((current_price - entry_price) / entry_price) * 100 * leverage
+                else:  # SHORT
+                    pnl_percentage = ((entry_price - current_price) / entry_price) * 100 * leverage
+                
+                unrealized_pnl = (order_size * pnl_percentage) / 100
+                self.status["unrealized_pnl"] = unrealized_pnl
+                
+        except Exception as e:
+            logger.error(f"❌ OPTIMIZED PnL calculation error: {e}")
 
     async def _optimized_monitor_loop(self):
         """🚀 OPTIMIZE EDİLMİŞ monitoring loop (CACHED DATA ONLY)"""
@@ -686,6 +821,57 @@ class BotCore:
                 logger.error(f"❌ OPTIMIZED monitor loop error: {e}")
                 await asyncio.sleep(20)  # 30 → 20
 
+    async def stop(self):
+        """🛑 OPTIMIZE EDİLMİŞ Bot stop"""
+        if not self.status["is_running"]:
+            return
+            
+        logger.info(f"🛑 Stopping OPTIMIZED bot for user {self.user_id}")
+        self._stop_requested = True
+        
+        # Task cleanup
+        tasks = [self._monitor_task, self._candle_watch_task, self._price_callback_task]
+        for task in tasks:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        
+        # Final cleanup
+        try:
+            await self.binance_client.cancel_all_orders_safe(self.status["symbol"])
+        except:
+            pass
+        
+        self.status.update({
+            "is_running": False,
+            "status_message": "🚀 OPTIMIZED Bot durduruldu.",
+            "last_check_time": datetime.now(timezone.utc).isoformat()
+        })
+        
+        logger.info(f"✅ OPTIMIZED bot stopped for user {self.user_id}")
+
+    # Helper methods
+    async def _track_strategy_performance(self, signal: str):
+        """📊 OPTIMIZE EDİLMİŞ Strategy performance tracking"""
+        try:
+            self.signal_history.append({
+                "signal": signal,
+                "price": self.current_price,
+                "timestamp": time.time(),
+                "timeframe": self.status["timeframe"],
+                "strategy_type": self.status["strategy_type"],
+                "optimization": "OPTIMIZED"
+            })
+            
+            if len(self.signal_history) > 100:  # 50 → 100 (daha fazla history)
+                self.signal_history.pop(0)
+                
+        except Exception as e:
+            logger.error(f"❌ OPTIMIZED performance tracking error: {e}")
+
     async def _update_optimized_status_message(self):
         """🚀 OPTIMIZE EDİLMİŞ status message"""
         try:
@@ -706,11 +892,95 @@ class BotCore:
         except Exception as e:
             logger.error(f"❌ OPTIMIZED status update error: {e}")
 
-    # ... (Rest of the methods remain the same with minor optimizations)
-    
+    async def _update_user_data(self):
+        """🔥 OPTIMIZE EDİLMİŞ Firebase user data update"""
+        try:
+            from app.main import firebase_db, firebase_initialized
+            
+            if firebase_initialized and firebase_db:
+                user_update = {
+                    "bot_active": self.status["is_running"],
+                    "bot_symbol": self.status["symbol"],
+                    "bot_timeframe": self.status["timeframe"],
+                    "bot_strategy": self.status["strategy_type"],
+                    "bot_position": self.status["position_side"],
+                    "total_trades": self.status["total_trades"],
+                    "total_pnl": self.status["total_pnl"],
+                    "account_balance": self.status["account_balance"],
+                    "current_price": self.current_price,
+                    "last_signal": self.status["last_signal"],
+                    "unrealized_pnl": self.status.get("unrealized_pnl", 0),
+                    "user_stop_loss": self.status["stop_loss"],
+                    "user_take_profit": self.status["take_profit"],
+                    "signal_frequency": self.status["signal_frequency"],
+                    "optimization_level": "OPTIMIZED",
+                    "last_bot_update": int(time.time() * 1000)
+                }
+                
+                user_ref = firebase_db.reference(f'users/{self.user_id}')
+                user_ref.update(user_update)
+            
+        except Exception as e:
+            logger.error(f"❌ OPTIMIZED user data update error: {e}")
+
+    async def _log_trade(self, trade_data: dict):
+        """📝 OPTIMIZE EDİLMİŞ Trade logging"""
+        try:
+            from app.main import firebase_db, firebase_initialized
+            
+            if firebase_initialized and firebase_db:
+                trade_log = {
+                    "user_id": self.user_id,
+                    "symbol": self.status["symbol"],
+                    "timeframe": self.status["timeframe"],
+                    "strategy_type": self.status["strategy_type"],
+                    "user_stop_loss": self.status["stop_loss"],
+                    "user_take_profit": self.status["take_profit"],
+                    "optimization": "OPTIMIZED",
+                    **trade_data
+                }
+                
+                trades_ref = firebase_db.reference('trades')
+                trades_ref.push(trade_log)
+                
+                self.trade_history.append(trade_log)
+                if len(self.trade_history) > 100:  # 50 → 100
+                    self.trade_history.pop(0)
+            
+        except Exception as e:
+            logger.error(f"❌ OPTIMIZED trade logging error: {e}")
+
+    def _calculate_position_size(self, order_size: float, leverage: int, price: float) -> float:
+        """Position size calculation"""
+        try:
+            quantity = (order_size * leverage) / price
+            return self._format_quantity(quantity)
+        except:
+            return 0.0
+
+    def _format_quantity(self, quantity: float) -> float:
+        """Quantity formatting"""
+        if self.quantity_precision == 0:
+            return math.floor(quantity)
+        factor = 10 ** self.quantity_precision
+        return math.floor(quantity * factor) / factor
+
+    def _get_precision_from_filter(self, symbol_info: dict, filter_type: str, key: str) -> int:
+        """Get precision from filters"""
+        try:
+            for f in symbol_info.get('filters', []):
+                if f.get('filterType') == filter_type:
+                    size_str = f.get(key, '0.001')
+                    if '.' in size_str:
+                        return len(size_str.split('.')[1].rstrip('0'))
+                    return 0
+        except:
+            pass
+        return 3 if filter_type == 'LOT_SIZE' else 2
+
     def get_status(self) -> dict:
         """🚀 OPTIMIZE EDİLMİŞ Bot status"""
-        base_status = {
+        return {
             "user_id": self.user_id,
             "is_running": self.status["is_running"],
             "symbol": self.status["symbol"],
@@ -745,20 +1015,19 @@ class BotCore:
             "consecutive_wins": self.status.get("consecutive_wins", 0),
             "strategy_performance": self.status.get("strategy_performance", "TRACKING"),
             "max_hold_time": self.status.get("max_hold_time", 0),
-            "risk_level": self.timeframe_strategy._get_risk_level() if hasattr(self, 'timeframe_strategy') else "MEDIUM",
+            "risk_level": self.timeframe_strategy._get_risk_level() if hasattr(self, 'timeframe_strategy') else "ORTA",
             
             # 🚀 OPTIMIZE EDİLMİŞ system info
-            "optimization": "🚀 OPTIMIZED",
+            "optimization": "🚀 OPTIMIZED FULL VERSION",
             "api_calls_saved": "95%+",
             "signal_detection": "Real-time + Candle close",
             "breakout_detection": "ACTIVE",
             "ban_protection": "ACTIVE",
-            "performance_mode": "HIGH_FREQUENCY"
+            "performance_mode": "HIGH_FREQUENCY",
+            "api_intervals": {
+                "price_monitoring": "5s",
+                "kline_fetch": f"{self.kline_fetch_interval}s",
+                "api_calls": f"{self.api_call_interval}s"
+            },
+            "breakout_levels": self.breakout_levels
         }
-        
-        return base_status
-
-    # ... (Diğer helper metodlar aynı kalacak - fazla uzun olacağı için burada kesiyorum)
-    # _flip_position, _close_position, _check_exit_conditions, _calculate_realtime_pnl, 
-    # _track_strategy_performance, _update_user_data, _log_trade, etc.
-    # Bunlar aynı kalacak, sadece log mesajlarına "OPTIMIZED" eklenecek
