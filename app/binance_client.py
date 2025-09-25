@@ -1,4 +1,4 @@
-# app/binance_client.py
+# app/binance_client.py - UPDATED: Bakiye Kontrollü + Simple EMA Optimized
 import asyncio
 import math
 import time
@@ -27,6 +27,7 @@ class BinanceRateLimiter:
             'order': RateLimit(50, 5, 5),
             'account': RateLimit(600, 5, 5),
             'position': RateLimit(300, 3, 2),
+            'balance': RateLimit(300, 3, 2),  # ✅ NEW: Balance specific limit
         }
         
         self.request_times: Dict[str, deque] = defaultdict(lambda: deque())
@@ -67,7 +68,7 @@ class BinanceRateLimiter:
 class PriceManager:
     """
     Singleton WebSocket Price Manager
-    Tüm kullanıcılar için merkezi fiyat yönetimi
+    Simple EMA için optimize edildi
     """
     _instance = None
     _initialized = False
@@ -86,7 +87,7 @@ class PriceManager:
             self.bm: Optional[BinanceSocketManager] = None
             self.websocket_tasks: Dict[str, asyncio.Task] = {}
             self.is_running = False
-            self._lock = asyncio.Lock()  # Thread safety için
+            self._lock = asyncio.Lock()
             PriceManager._initialized = True
     
     async def initialize(self):
@@ -135,7 +136,7 @@ class PriceManager:
                 
                 async with self.bm.symbol_ticker_socket(symbol) as stream:
                     logger.info(f"WebSocket connected for {symbol}")
-                    retry_count = 0  # Reset retry count on successful connection
+                    retry_count = 0
                     
                     while self.is_running:
                         try:
@@ -153,7 +154,7 @@ class PriceManager:
                 logger.error(f"WebSocket error for {symbol} (retry {retry_count}): {e}")
                 
                 if retry_count < max_retries:
-                    wait_time = min(2 ** retry_count, 30)  # Exponential backoff
+                    wait_time = min(2 ** retry_count, 30)
                     await asyncio.sleep(wait_time)
                 else:
                     logger.error(f"Max retries reached for {symbol} WebSocket")
@@ -168,8 +169,8 @@ class PriceManager:
             self.prices[symbol] = price
             self.price_timestamps[symbol] = time.time()
             
-            # Debug log (çok sık log olmaması için her 100. güncellemeyi logla)
-            if int(time.time()) % 10 == 0:  # Her 10 saniyede bir
+            # Debug log (her 30 saniyede bir)
+            if int(time.time()) % 30 == 0:
                 logger.debug(f"Price updated: {symbol} = ${price:.2f}")
                 
         except Exception as e:
@@ -199,13 +200,11 @@ class PriceManager:
                     except Exception as e:
                         logger.error(f"Error cancelling websocket task: {e}")
             
-            # Task listesini temizle
             self.websocket_tasks.clear()
             
             # BinanceSocketManager'ı kapat
             if self.bm:
                 try:
-                    # BinanceSocketManager'ın dahili session'larını kapat
                     if hasattr(self.bm, '_session') and self.bm._session:
                         await self.bm._session.close()
                 except Exception as e:
@@ -227,8 +226,8 @@ class PriceManager:
 
 class BinanceClient:
     """
-    Optimize edilmiş Binance Client
-    WebSocket price data + Rate limiting + Per-user caching + Public/Private separation
+    💰 BAKİYE KONTROLÜ + Simple EMA Optimized Binance Client
+    WebSocket price data + Rate limiting + Per-user caching + Balance monitoring
     """
     
     # Shared instances
@@ -245,9 +244,13 @@ class BinanceClient:
         self.is_public_only = not bool(self.api_key and self.api_secret)
         self._connection_closed = False
         
-        # Cache variables - kullanıcıya özel
+        # 💰 BAKİYE CACHE - Simple EMA için optimize edildi
         self._last_balance_check = 0
         self._cached_balance = 0.0
+        self._balance_cache_duration = 120  # 2 dakika cache (Simple EMA için yeterli)
+        self._balance_check_in_progress = False
+        
+        # Cache variables
         self._last_position_check = {}
         self._cached_positions = {}
         
@@ -261,7 +264,7 @@ class BinanceClient:
         self.price_manager = BinanceClient._price_manager
         self.rate_limiter = BinanceClient._rate_limiter
         
-        logger.info(f"BinanceClient created for user: {self.user_id} (public_only: {self.is_public_only})")
+        logger.info(f"💰 BinanceClient created for user: {self.user_id} (balance_monitored: {not self.is_public_only})")
     
     async def __aenter__(self):
         """Context manager entry"""
@@ -269,7 +272,7 @@ class BinanceClient:
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit - only close client connection"""
+        """Context manager exit"""
         await self.close()
     
     async def initialize(self):
@@ -281,7 +284,7 @@ class BinanceClient:
             # User-specific client oluştur
             if self.client is None and not self._connection_closed:
                 if self.is_public_only:
-                    # Public-only client (no API credentials needed)
+                    # Public-only client
                     self.client = await AsyncClient.create(
                         testnet=self.is_testnet
                     )
@@ -293,26 +296,27 @@ class BinanceClient:
                         logger.error(f"API credentials missing for user: {self.user_id}")
                         return False
                     
-                    # Connection timeout ve retry settings ile daha güvenli client
                     self.client = await AsyncClient.create(
                         self.api_key, 
                         self.api_secret, 
                         testnet=self.is_testnet,
                         requests_params={
-                            'timeout': 10,  # 10 saniye timeout
+                            'timeout': 10,
                         }
                     )
                     
-                    # Test connection with private endpoint
+                    # Test connection with account endpoint
                     await self.rate_limiter.wait_if_needed('account', self.user_id)
-                    await self.client.futures_account()
+                    account_test = await self.client.futures_account()
                     
-                    logger.info(f"Private BinanceClient initialized for user: {self.user_id}")
+                    # ✅ İLK BAKİYE YÜKLEMESİ
+                    await self._load_initial_balance()
+                    
+                    logger.info(f"💰 Private BinanceClient initialized for user: {self.user_id} (Balance: {self._cached_balance:.2f} USDT)")
                     return True
                 
         except Exception as e:
             logger.error(f"Initialization failed for user {self.user_id}: {e}")
-            # Başarısız olan client'ı temizle
             if self.client:
                 try:
                     await self.client.close_connection()
@@ -321,8 +325,24 @@ class BinanceClient:
                 self.client = None
             return False
     
+    async def _load_initial_balance(self):
+        """💰 İlk bakiye yüklemesi"""
+        try:
+            if not self.is_public_only and self.client:
+                account = await self.client.futures_account()
+                
+                for asset in account['assets']:
+                    if asset['asset'] == 'USDT':
+                        self._cached_balance = float(asset['walletBalance'])
+                        self._last_balance_check = time.time()
+                        logger.info(f"💰 Initial balance loaded: {self._cached_balance:.2f} USDT")
+                        break
+        except Exception as e:
+            logger.error(f"💰 Initial balance loading failed: {e}")
+            self._cached_balance = 0.0
+    
     async def close(self):
-        """Client bağlantısını kapat - bu eksik olan metod!"""
+        """Client bağlantısını kapat"""
         if not self._connection_closed and self.client:
             try:
                 await self.client.close_connection()
@@ -334,7 +354,7 @@ class BinanceClient:
                 self._connection_closed = True
     
     async def close_connection(self):
-        """Backward compatibility için - close() metodunu çağırır"""
+        """Backward compatibility için"""
         await self.close()
     
     async def subscribe_to_symbol(self, symbol: str):
@@ -342,15 +362,13 @@ class BinanceClient:
         await self.price_manager.subscribe_symbol(symbol)
     
     async def get_market_price(self, symbol: str):
-        """
-        Market fiyatını al - Önce WebSocket cache'den, sonra REST API
-        """
+        """Market fiyatını al - WebSocket cache priority"""
         # WebSocket cache'den dene
         price = self.price_manager.get_price(symbol)
         if price:
             return price
         
-        # Cache'de yoksa REST API kullan (fallback)
+        # Cache'de yoksa REST API kullan
         try:
             logger.warning(f"Using REST API fallback for {symbol} price")
             await self.rate_limiter.wait_if_needed('default', self.user_id)
@@ -360,8 +378,98 @@ class BinanceClient:
             logger.error(f"Error getting market price for {symbol}: {e}")
             return None
     
+    async def get_account_balance(self, use_cache: bool = True):
+        """
+        💰 BAKİYE KONTROLÜ - Simple EMA için optimize edildi
+        Cache kullanarak API çağrısını minimize eder
+        """
+        if self.is_public_only:
+            logger.warning(f"Account balance requested for public-only client: {self.user_id}")
+            return 0.0
+        
+        try:
+            current_time = time.time()
+            
+            # Cache kontrolü
+            if use_cache and current_time - self._last_balance_check < self._balance_cache_duration:
+                return self._cached_balance
+            
+            # Concurrent balance check kontrolü
+            if self._balance_check_in_progress:
+                # Başka bir balance check devam ediyor, cache'i döndür
+                return self._cached_balance
+            
+            # Balance check başlat
+            self._balance_check_in_progress = True
+            
+            try:
+                await self.rate_limiter.wait_if_needed('balance', self.user_id)
+                account = await self.client.futures_account()
+                
+                # USDT balance'ı bul
+                new_balance = 0.0
+                for asset in account['assets']:
+                    if asset['asset'] == 'USDT':
+                        new_balance = float(asset['walletBalance'])
+                        break
+                
+                # Cache güncelle
+                old_balance = self._cached_balance
+                self._cached_balance = new_balance
+                self._last_balance_check = current_time
+                
+                # Log balance changes
+                if abs(new_balance - old_balance) > 0.1:  # 0.1 USDT'den fazla değişim
+                    logger.info(f"💰 Balance updated for user {self.user_id}: {old_balance:.2f} -> {new_balance:.2f} USDT")
+                
+                return new_balance
+                
+            finally:
+                self._balance_check_in_progress = False
+            
+        except BinanceAPIException as e:
+            self._balance_check_in_progress = False
+            if "-1003" in str(e):  # Rate limit
+                logger.warning(f"💰 Balance rate limit hit for user {self.user_id}")
+                return self._cached_balance
+            logger.error(f"💰 Balance API error for user {self.user_id}: {e}")
+            return self._cached_balance
+        except Exception as e:
+            self._balance_check_in_progress = False
+            logger.error(f"💰 Unexpected balance error for user {self.user_id}: {e}")
+            return self._cached_balance
+    
+    async def get_balance_with_status(self):
+        """
+        💰 Bakiye ve durumunu birlikte döndürür
+        Simple EMA bot için
+        """
+        try:
+            balance = await self.get_account_balance(use_cache=False)
+            
+            return {
+                "balance": balance,
+                "cached": False,
+                "last_check": self._last_balance_check,
+                "cache_age": time.time() - self._last_balance_check,
+                "sufficient_for_trading": balance >= 20.0,  # Simple EMA minimum
+                "status": "ok" if balance >= 20.0 else "insufficient"
+            }
+            
+        except Exception as e:
+            logger.error(f"💰 Balance status error: {e}")
+            return {
+                "balance": self._cached_balance,
+                "cached": True,
+                "last_check": self._last_balance_check,
+                "cache_age": time.time() - self._last_balance_check,
+                "sufficient_for_trading": self._cached_balance >= 20.0,
+                "status": "error",
+                "error": str(e)
+            }
+    
     async def get_open_positions(self, symbol: str, use_cache: bool = True):
-        """Açık pozisyonları getir - cache desteği ile (sadece private client'lar için)"""
+        """Açık pozisyonları getir - cache desteği ile"""
         if self.is_public_only:
             logger.warning(f"Open positions requested for public-only client: {self.user_id}")
             return []
@@ -370,15 +478,15 @@ class BinanceClient:
             current_time = time.time()
             cache_key = symbol
             
-            # Cache kontrolü (5 saniye cache)
+            # Cache kontrolü (30 saniye cache - Simple EMA için yeterli)
             if use_cache and cache_key in self._last_position_check:
-                if current_time - self._last_position_check[cache_key] < 40:
+                if current_time - self._last_position_check[cache_key] < 30:
                     return self._cached_positions.get(cache_key, [])
             
             await self.rate_limiter.wait_if_needed('position', self.user_id)
             positions = await self.client.futures_position_information(symbol=symbol)
             
-            # Safe parsing - 'percentage' hatası için koruma
+            # Safe parsing
             open_positions = []
             for p in positions:
                 try:
@@ -478,41 +586,6 @@ class BinanceClient:
             logger.error(f"Market order creation failed for user {self.user_id}: {e}")
             await self.cancel_all_orders_safe(symbol)
             return None
-    
-    async def get_account_balance(self, use_cache: bool = True):
-        """Hesap bakiyesi getir - cache desteği ile (sadece private client'lar için)"""
-        if self.is_public_only:
-            logger.warning(f"Account balance requested for public-only client: {self.user_id}")
-            return 0.0
-            
-        try:
-            current_time = time.time()
-            
-            # Cache kontrolü (30 saniye cache - balance daha az sıklıkla değişir)
-            if use_cache and current_time - self._last_balance_check < 30:
-                return self._cached_balance
-            
-            await self.rate_limiter.wait_if_needed('account', self.user_id)
-            account = await self.client.futures_account()
-            
-            total_balance = 0.0
-            for asset in account['assets']:
-                if asset['asset'] == 'USDT':
-                    total_balance = float(asset['walletBalance'])
-                    break
-            
-            # Cache güncelle
-            self._last_balance_check = current_time
-            self._cached_balance = total_balance
-            
-            return total_balance
-            
-        except BinanceAPIException as e:
-            if "-1003" in str(e):
-                logger.warning(f"Rate limit hit for balance - user {self.user_id}")
-                return self._cached_balance
-            logger.error(f"Error getting account balance for user {self.user_id}: {e}")
-            return self._cached_balance
     
     async def cancel_all_orders_safe(self, symbol: str):
         """Tüm açık emirleri güvenli şekilde iptal et"""
@@ -693,16 +766,27 @@ class BinanceClient:
             return None
     
     async def get_historical_klines(self, symbol: str, interval: str, limit: int = 100):
-        """Geçmiş kline verilerini al"""
+        """Geçmiş kline verilerini al - Simple EMA için optimize edildi"""
         try:
             await self.rate_limiter.wait_if_needed('default', self.user_id)
             klines = await self.client.futures_klines(
                 symbol=symbol,
                 interval=interval,
-                limit=limit
+                limit=min(limit, 100)  # Simple EMA için maximum 100 yeterli
             )
             return klines
             
         except Exception as e:
             logger.error(f"Error getting historical klines for {symbol} - user {self.user_id}: {e}")
             return []
+    
+    def get_balance_cache_info(self):
+        """💰 Bakiye cache bilgilerini döndür"""
+        return {
+            "cached_balance": self._cached_balance,
+            "last_check": self._last_balance_check,
+            "cache_age_seconds": time.time() - self._last_balance_check,
+            "cache_duration": self._balance_cache_duration,
+            "is_cache_fresh": (time.time() - self._last_balance_check) < self._balance_cache_duration,
+            "check_in_progress": self._balance_check_in_progress
+        }
