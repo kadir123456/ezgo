@@ -1,4 +1,4 @@
-# app/bot_manager.py - FIXED: Timeframe & TP/SL Integration
+# app/bot_manager.py - UPDATED: Bakiye Kontrollü + Simple EMA Integration
 import asyncio
 import time
 from typing import Dict, Optional
@@ -11,12 +11,11 @@ from pydantic import BaseModel, Field
 logger = get_logger("bot_manager")
 
 class StartRequest(BaseModel):
-    # 🔧 FIXED: Tüm timeframe'leri destekle
+    # ✅ UPDATED: Tüm timeframe'leri destekle + bakiye validation
     symbol: str = Field(..., min_length=6, max_length=12)
     timeframe: str = Field(..., pattern=r'^(1m|3m|5m|15m|30m|1h|2h|4h|6h|8h|12h|1d)$')
     leverage: int = Field(..., ge=1, le=125)
-    order_size: float = Field(..., ge=10.0, le=10000.0)
-    # 🔧 FIXED: TP/SL decimal precision için
+    order_size: float = Field(..., ge=20.0, le=10000.0)  # ✅ Minimum 20 USDT (bakiye için)
     stop_loss: float = Field(..., ge=0.01, le=50.0)     # 0.01% - 50%
     take_profit: float = Field(..., ge=0.01, le=100.0)  # 0.01% - 100%
 
@@ -27,9 +26,9 @@ class StartRequest(BaseModel):
                 "symbol": "BTCUSDT",
                 "timeframe": "15m",
                 "leverage": 10,
-                "order_size": 35.0,
-                "stop_loss": 0.3,      # 0.3%
-                "take_profit": 0.5     # 0.5%
+                "order_size": 50.0,    # ✅ 35 -> 50 (bakiye için yeterli)
+                "stop_loss": 0.8,      # ✅ Simple EMA için optimize
+                "take_profit": 1.0     # ✅ Simple EMA için optimize
             }
         }
 
@@ -98,10 +97,12 @@ class RateLimitTracker:
         self.user_api_calls[user_id].append(now)
         return True
 
-class OptimizedBotManager:
+class SimpleBotManager:
     """
-    ✅ FIXED: Multi-timeframe & TP/SL Bot Manager
-    Tüm timeframe'leri destekler + Kullanıcı TP/SL değerleri
+    💰 BAKİYE KONTROLÜ + Simple EMA Bot Manager
+    - Minimum 20 USDT bakiye kontrolü
+    - EMA9 x EMA21 kesişimi stratejisi
+    - Otomatik bot durdurma (yetersiz bakiye)
     """
     
     def __init__(self):
@@ -115,15 +116,17 @@ class OptimizedBotManager:
         self._monitor_task = None
         self._running = False
         
-        logger.info("✅ OptimizedBotManager initialized with multi-timeframe support")
+        logger.info("💰 SimpleBotManager initialized with balance control + Simple EMA")
 
     async def start_bot_for_user(self, uid: str, bot_settings: StartRequest) -> Dict:
         """
-        🚀 FIXED: Multi-timeframe bot başlatma
+        💰 BAKİYE KONTROLÜ + Simple EMA bot başlatma
         """
         try:
-            logger.info(f"🚀 Starting {bot_settings.timeframe} bot for user: {uid}")
-            logger.info(f"🔧 Settings: Symbol={bot_settings.symbol}, TF={bot_settings.timeframe}, SL={bot_settings.stop_loss}%, TP={bot_settings.take_profit}%")
+            logger.info(f"💰 Starting Simple EMA bot for user: {uid}")
+            logger.info(f"🔧 Settings: Symbol={bot_settings.symbol}, TF={bot_settings.timeframe}")
+            logger.info(f"💰 Order Size: {bot_settings.order_size} USDT (Min: 20 USDT)")
+            logger.info(f"📊 TP/SL: {bot_settings.take_profit}%/{bot_settings.stop_loss}%")
             
             # Rate limit kontrolü
             if not self.rate_limiter.can_start_bot(uid, max_calls=5):
@@ -160,7 +163,7 @@ class OptimizedBotManager:
                 if not api_key or not api_secret:
                     return {"error": "API anahtarları çözülemedi."}
 
-                # 🔧 FIXED: StartRequest'i dict'e çevir
+                # ✅ UPDATED: StartRequest'i dict'e çevir + bakiye validation
                 bot_settings_dict = {
                     "symbol": bot_settings.symbol,
                     "timeframe": bot_settings.timeframe,
@@ -170,9 +173,39 @@ class OptimizedBotManager:
                     "take_profit": bot_settings.take_profit     # Kullanıcının değeri
                 }
                 
-                logger.info(f"🔧 Bot settings dict: {bot_settings_dict}")
+                # 💰 BAKIYE ÖN KONTROLÜ - Bot başlatmadan önce
+                try:
+                    from app.binance_client import BinanceClient
+                    
+                    # Geçici client ile bakiye kontrolü
+                    temp_client = BinanceClient(api_key, api_secret, f"{uid}_balance_check")
+                    await temp_client.initialize()
+                    
+                    balance_info = await temp_client.get_balance_with_status()
+                    current_balance = balance_info["balance"]
+                    
+                    await temp_client.close()
+                    
+                    logger.info(f"💰 Pre-start balance check: {current_balance:.2f} USDT")
+                    
+                    # Minimum bakiye kontrolü (20 USDT + order size buffer)
+                    min_required = max(20.0, bot_settings.order_size * 0.1)  # En az order_size'ın %10'u
+                    
+                    if current_balance < min_required:
+                        return {
+                            "error": f"Yetersiz bakiye: {current_balance:.2f} USDT < {min_required:.2f} USDT. "
+                                   f"Simple EMA bot için minimum {min_required:.1f} USDT gerekli."
+                        }
+                    
+                    logger.info(f"✅ Balance check passed: {current_balance:.2f} USDT >= {min_required:.2f} USDT")
+                    
+                except Exception as balance_error:
+                    logger.error(f"💰 Balance pre-check failed: {balance_error}")
+                    return {"error": f"Bakiye kontrolü başarısız: {str(balance_error)}"}
                 
-                # ✅ FIXED: BotCore'a dict geç
+                logger.info(f"🎯 Bot settings dict: {bot_settings_dict}")
+                
+                # ✅ UPDATED: BotCore'a dict geç
                 bot_core = BotCore(uid, api_key, api_secret, bot_settings_dict)
                 
                 # BotCore'u başlat
@@ -185,7 +218,9 @@ class OptimizedBotManager:
                 user_config = {
                     "uid": uid,
                     "settings": bot_settings_dict,
-                    "start_time": time.time()
+                    "start_time": time.time(),
+                    "balance_at_start": current_balance,
+                    "min_balance_required": min_required
                 }
                 
                 self.active_users[uid] = user_config
@@ -197,21 +232,23 @@ class OptimizedBotManager:
                     "is_running": True,
                     "symbol": bot_settings.symbol,
                     "timeframe": bot_settings.timeframe,
+                    "strategy_type": "Simple EMA Crossover",
                     "leverage": bot_settings.leverage,
                     "order_size": bot_settings.order_size,
                     "stop_loss": bot_settings.stop_loss,
                     "take_profit": bot_settings.take_profit,
                     "position_side": bot_status.get("position_side"),
-                    "status_message": f"✅ {bot_settings.timeframe} Bot aktif - {bot_settings.symbol} (TP:{bot_settings.take_profit}% SL:{bot_settings.stop_loss}%)",
+                    "status_message": f"💰 Simple EMA Bot aktif - {bot_settings.symbol} ({bot_settings.timeframe}) - Min: {min_required:.1f} USDT",
                     "account_balance": bot_status.get("account_balance", 0),
+                    "balance_sufficient": bot_status.get("balance_sufficient", True),
+                    "min_balance_required": min_required,
                     "position_pnl": bot_status.get("position_pnl", 0),
                     "total_trades": bot_status.get("total_trades", 0),
                     "total_pnl": bot_status.get("total_pnl", 0),
                     "last_check_time": time.time(),
                     "current_price": bot_status.get("current_price"),
                     "data_candles": bot_status.get("data_candles", 0),
-                    "last_signal": bot_status.get("last_signal", "HOLD"),
-                    "strategy_type": bot_status.get("strategy_type", "swing")
+                    "last_signal": bot_status.get("last_signal", "HOLD")
                 }
 
                 # Background monitor başlat
@@ -220,18 +257,27 @@ class OptimizedBotManager:
                     self._monitor_task = asyncio.create_task(self._global_monitor_loop())
                     logger.info("✅ Global monitor started")
 
-                logger.info(f"✅ {bot_settings.timeframe} trading bot started for user: {uid}")
+                logger.info(f"💰 Simple EMA trading bot started for user: {uid}")
                 
                 return {
                     "success": True,
-                    "message": f"✅ {bot_settings.timeframe} trading bot başarıyla başlatıldı",
+                    "message": f"💰 Simple EMA trading bot başarıyla başlatıldı",
                     "settings": {
                         "timeframe": bot_settings.timeframe,
                         "symbol": bot_settings.symbol,
+                        "strategy": "EMA9 x EMA21 Crossover",
                         "stop_loss": bot_settings.stop_loss,
                         "take_profit": bot_settings.take_profit,
                         "leverage": bot_settings.leverage,
-                        "order_size": bot_settings.order_size
+                        "order_size": bot_settings.order_size,
+                        "balance_monitoring": True,
+                        "min_balance_required": min_required
+                    },
+                    "balance_info": {
+                        "current_balance": current_balance,
+                        "min_required": min_required,
+                        "balance_sufficient": True,
+                        "monitoring_enabled": True
                     },
                     "status": self.user_statuses[uid]
                 }
@@ -262,27 +308,39 @@ class OptimizedBotManager:
             if uid in self.user_statuses:
                 del self.user_statuses[uid]
 
-            logger.info(f"✅ Bot stopped for user: {uid}")
+            logger.info(f"💰 Simple EMA Bot stopped for user: {uid}")
             
-            return {"success": True, "message": "✅ Bot başarıyla durduruldu."}
+            return {"success": True, "message": "💰 Simple EMA Bot başarıyla durduruldu."}
 
         except Exception as e:
             logger.error(f"❌ Error stopping bot for user {uid}: {e}")
             return {"error": f"Bot durdurulamadı: {str(e)}"}
 
     def get_bot_status(self, uid: str) -> Dict:
-        """BotCore'dan gerçek status al"""
+        """BotCore'dan gerçek status al + bakiye bilgisi"""
         if uid in self.bot_instances:
             bot_core = self.bot_instances[uid]
             real_status = bot_core.get_status()
+            
+            # 💰 Bakiye bilgilerini ekle
+            balance_cache_info = bot_core.binance_client.get_balance_cache_info()
             
             # System stats ekle
             real_status["system_info"] = {
                 "total_active_bots": len(self.bot_instances),
                 "shared_websocket": True,
-                "architecture": "api_safe",
+                "architecture": "simple_ema_balance_controlled",
                 "timeframe_support": ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"],
-                "custom_tp_sl": True
+                "strategy": "EMA9 x EMA21 Crossover",
+                "balance_monitoring": True
+            }
+            
+            # 💰 Bakiye monitoring bilgileri
+            real_status["balance_info"] = {
+                **balance_cache_info,
+                "monitoring_active": True,
+                "auto_stop_enabled": True,
+                "check_interval": "2 minutes"
             }
             
             return real_status
@@ -292,28 +350,35 @@ class OptimizedBotManager:
             "is_running": False,
             "symbol": None,
             "timeframe": None,
+            "strategy_type": "Simple EMA Crossover",
             "position_side": None,
             "status_message": "Bot başlatılmadı.",
             "account_balance": 0.0,
+            "balance_sufficient": True,
+            "min_balance_required": 20.0,
             "position_pnl": 0.0,
             "total_trades": 0,
             "total_pnl": 0.0,
             "last_check_time": None,
             "last_signal": "HOLD",
             "stop_loss": 0.0,
-            "take_profit": 0.0
+            "take_profit": 0.0,
+            "balance_info": {
+                "monitoring_active": False,
+                "message": "Bot not running"
+            }
         }
 
     async def _global_monitor_loop(self):
-        """Global monitor loop"""
-        logger.info("📊 Global monitor loop started with multi-timeframe support")
+        """Global monitor loop + bakiye monitoring"""
+        logger.info("💰 Global monitor loop started with balance monitoring + Simple EMA")
         
         while self._running:
             try:
-                # Her kullanıcı için BotCore sync
+                # Her kullanıcı için BotCore sync + balance check
                 for uid in list(self.bot_instances.keys()):
                     try:
-                        await self._sync_botcore_status(uid)
+                        await self._sync_botcore_status_with_balance(uid)
                         self._queue_firebase_update(uid)
                     except Exception as e:
                         logger.error(f"❌ Monitor error for user {uid}: {e}")
@@ -327,8 +392,8 @@ class OptimizedBotManager:
                 logger.error(f"❌ Global monitor error: {e}")
                 await asyncio.sleep(10)
 
-    async def _sync_botcore_status(self, uid: str):
-        """BotCore status sync"""
+    async def _sync_botcore_status_with_balance(self, uid: str):
+        """BotCore status sync + balance monitoring"""
         if uid in self.bot_instances and uid in self.user_statuses:
             try:
                 bot_core = self.bot_instances[uid]
@@ -339,6 +404,8 @@ class OptimizedBotManager:
                     "is_running": real_status.get("is_running", True),
                     "position_side": real_status.get("position_side"),
                     "account_balance": real_status.get("account_balance", 0),
+                    "balance_sufficient": real_status.get("balance_sufficient", True),
+                    "min_balance_required": real_status.get("min_balance_required", 20.0),
                     "position_pnl": real_status.get("position_pnl", 0),
                     "unrealized_pnl": real_status.get("unrealized_pnl", 0),
                     "total_trades": real_status.get("total_trades", 0),
@@ -351,30 +418,37 @@ class OptimizedBotManager:
                     "consecutive_losses": real_status.get("consecutive_losses", 0),
                     "stop_loss": real_status.get("stop_loss", 0),
                     "take_profit": real_status.get("take_profit", 0),
-                    "strategy_type": real_status.get("strategy_type", "swing"),
+                    "strategy_type": "Simple EMA Crossover",
                     "timeframe": real_status.get("timeframe", "15m"),
                     "last_check_time": time.time()
                 })
                 
-                # Bot durmuşsa temizle
+                # 💰 Bakiye yetersizliği nedeniyle bot durmuşsa temizle
                 if not real_status.get("is_running", True):
-                    logger.warning(f"⚠️ BotCore stopped running for user {uid}, cleaning up")
-                    await self.stop_bot_for_user(uid)
+                    balance_sufficient = real_status.get("balance_sufficient", True)
+                    if not balance_sufficient:
+                        logger.warning(f"💰 Bot stopped due to insufficient balance for user {uid}")
+                        await self.stop_bot_for_user(uid)
+                    else:
+                        logger.warning(f"⚠️ BotCore stopped for other reason for user {uid}")
+                        await self.stop_bot_for_user(uid)
                 
             except Exception as e:
                 logger.error(f"❌ BotCore sync error for user {uid}: {e}")
 
     def _queue_firebase_update(self, uid: str):
-        """Firebase update queue"""
+        """Firebase update queue + bakiye bilgileri"""
         if uid in self.user_statuses:
             status = self.user_statuses[uid]
             update_data = {
                 "bot_active": status.get("is_running", False),
                 "bot_symbol": status.get("symbol"),
                 "bot_timeframe": status.get("timeframe"),
-                "bot_strategy": status.get("strategy_type"),
+                "bot_strategy": "Simple EMA Crossover",
                 "bot_position": status.get("position_side"),
                 "account_balance": status.get("account_balance", 0),
+                "balance_sufficient": status.get("balance_sufficient", True),
+                "min_balance_required": status.get("min_balance_required", 20.0),
                 "position_pnl": status.get("position_pnl", 0),
                 "unrealized_pnl": status.get("unrealized_pnl", 0),
                 "total_trades": status.get("total_trades", 0),
@@ -384,9 +458,11 @@ class OptimizedBotManager:
                 "last_signal": status.get("last_signal", "HOLD"),
                 "data_candles": status.get("data_candles", 0),
                 "consecutive_losses": status.get("consecutive_losses", 0),
-                # 🔧 FIXED: TP/SL değerlerini Firebase'e kaydet
+                # ✅ UPDATED: TP/SL değerlerini Firebase'e kaydet
                 "user_stop_loss": status.get("stop_loss", 0),
                 "user_take_profit": status.get("take_profit", 0),
+                "strategy_indicators": "EMA9 x EMA21",
+                "balance_monitoring_active": True,
                 "last_bot_update": int(time.time() * 1000)
             }
             self.firebase_batcher.queue_update(uid, update_data)
@@ -394,7 +470,7 @@ class OptimizedBotManager:
     async def shutdown_all_bots(self):
         """Tüm botları durdur"""
         try:
-            logger.info("🛑 Shutting down all bots...")
+            logger.info("💰 Shutting down all Simple EMA bots...")
             self._running = False
             
             if self._monitor_task and not self._monitor_task.done():
@@ -416,7 +492,7 @@ class OptimizedBotManager:
             self.active_users.clear()
             self.user_statuses.clear()
             
-            logger.info("✅ All BotCore instances shutdown completed")
+            logger.info("✅ All Simple EMA BotCore instances shutdown completed")
             
         except Exception as e:
             logger.error(f"❌ Shutdown error: {e}")
@@ -426,13 +502,18 @@ class OptimizedBotManager:
         return len(self.bot_instances)
 
     def get_system_stats(self) -> dict:
-        """System istatistikleri"""
+        """System istatistikleri + bakiye monitoring"""
         trading_bots = len(self.bot_instances)
         active_traders = sum(1 for uid in self.bot_instances 
                            if self.user_statuses.get(uid, {}).get("position_side"))
         
         total_trades = sum(status.get("total_trades", 0) for status in self.user_statuses.values())
         total_pnl = sum(status.get("total_pnl", 0) for status in self.user_statuses.values())
+        
+        # Balance monitoring stats
+        users_with_sufficient_balance = sum(1 for status in self.user_statuses.values() 
+                                          if status.get("balance_sufficient", True))
+        users_with_insufficient_balance = trading_bots - users_with_sufficient_balance
         
         # Timeframe distribution
         timeframes_used = {}
@@ -460,46 +541,64 @@ class OptimizedBotManager:
             "bots_with_positions": active_traders,
             "total_trades_executed": total_trades,
             "total_system_pnl": round(total_pnl, 2),
+            "balance_monitoring": {
+                "users_with_sufficient_balance": users_with_sufficient_balance,
+                "users_with_insufficient_balance": users_with_insufficient_balance,
+                "monitoring_enabled": True,
+                "auto_stop_enabled": True,
+                "min_balance_requirement": "20 USDT"
+            },
+            "strategy_info": {
+                "type": "Simple EMA Crossover",
+                "indicators": "EMA9 x EMA21",
+                "filters": "None - Pure crossover",
+                "signal_types": ["Golden Cross (LONG)", "Death Cross (SHORT)"]
+            },
             "timeframes_distribution": timeframes_used,
             "tp_sl_stats": tp_sl_stats,
             "active_user_ids": list(self.active_users.keys()),
-            "system_status": "API_SAFE_MULTI_TIMEFRAME",
-            "architecture": "shared_websocket_per_symbol",
+            "system_status": "SIMPLE_EMA_BALANCE_CONTROLLED",
+            "architecture": "simple_ema_with_balance_monitoring",
             "supported_timeframes": ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"],
             "features": {
                 "real_trading": "✅ ENABLED",
+                "balance_monitoring": "✅ ENABLED",
+                "simple_ema_strategy": "✅ ENABLED",
+                "auto_stop_insufficient_balance": "✅ ENABLED",
                 "shared_websocket": "✅ ENABLED", 
                 "rate_limiting": "✅ ENABLED",
                 "firebase_batching": "✅ ENABLED",
                 "multi_timeframe": "✅ ENABLED",
-                "custom_tp_sl": "✅ ENABLED",
-                "api_ban_protection": "✅ ENABLED"
+                "custom_tp_sl": "✅ ENABLED"
             },
             "performance": {
+                "strategy": "Simple & Fast EMA Crossovers",
                 "api_calls_saved": "95%+",
                 "memory_efficiency": "HIGH",
-                "ban_protection": "ACTIVE"
+                "balance_protection": "ACTIVE"
             }
         }
 
     def get_user_list_with_stats(self) -> dict:
-        """Kullanıcı listesi detaylı bilgiler ile"""
+        """Kullanıcı listesi detaylı bilgiler ile + bakiye durumu"""
         users = []
         for uid, status in self.user_statuses.items():
             user_info = {
                 "user_id": uid,
                 "symbol": status.get("symbol"),
                 "timeframe": status.get("timeframe"),
+                "strategy": "EMA9 x EMA21",
                 "is_running": status.get("is_running", False),
                 "position": status.get("position_side"),
                 "balance": status.get("account_balance", 0),
+                "balance_sufficient": status.get("balance_sufficient", True),
+                "min_balance_required": status.get("min_balance_required", 20.0),
                 "pnl": status.get("total_pnl", 0),
                 "trades": status.get("total_trades", 0),
                 "signal": status.get("last_signal", "HOLD"),
                 "price": status.get("current_price"),
                 "stop_loss": status.get("stop_loss", 0),
                 "take_profit": status.get("take_profit", 0),
-                "strategy": status.get("strategy_type", "swing"),
                 "uptime": time.time() - self.active_users.get(uid, {}).get("start_time", time.time())
             }
             users.append(user_info)
@@ -510,5 +609,5 @@ class OptimizedBotManager:
             "system_stats": self.get_system_stats()
         }
 
-# Global bot manager instance
-bot_manager = OptimizedBotManager()
+# Global bot manager instance - Updated
+bot_manager = SimpleBotManager()
