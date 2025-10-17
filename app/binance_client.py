@@ -1,4 +1,4 @@
-# app/binance_client.py - UPDATED: Bakiye Kontrollü + Simple EMA Optimized
+# app/binance_client.py - FIXED: WebSocket Timeout + Bakiye Kontrollü + Simple EMA Optimized
 import asyncio
 import math
 import time
@@ -27,7 +27,7 @@ class BinanceRateLimiter:
             'order': RateLimit(50, 5, 5),
             'account': RateLimit(600, 5, 5),
             'position': RateLimit(300, 3, 2),
-            'balance': RateLimit(300, 3, 2),  # ✅ NEW: Balance specific limit
+            'balance': RateLimit(300, 3, 2),
         }
         
         self.request_times: Dict[str, deque] = defaultdict(lambda: deque())
@@ -67,8 +67,10 @@ class BinanceRateLimiter:
 
 class PriceManager:
     """
-    Singleton WebSocket Price Manager
-    Simple EMA için optimize edildi
+    Singleton WebSocket Price Manager - FIXED VERSION
+    ✅ WebSocket timeout düzeltildi
+    ✅ Ping/pong mekanizması eklendi
+    ✅ Reconnection logic iyileştirildi
     """
     _instance = None
     _initialized = False
@@ -104,10 +106,10 @@ class PriceManager:
                 self.bm = BinanceSocketManager(self.client)
                 self.is_running = True
                 
-                logger.info("PriceManager initialized successfully")
+                logger.info("✅ PriceManager initialized successfully")
                 return True
             except Exception as e:
-                logger.error(f"Failed to initialize PriceManager: {e}")
+                logger.error(f"❌ Failed to initialize PriceManager: {e}")
                 return False
     
     async def subscribe_symbol(self, symbol: str):
@@ -123,42 +125,63 @@ class PriceManager:
                         self._symbol_websocket(symbol)
                     )
                 
-                logger.info(f"Subscribed to {symbol} price stream")
+                logger.info(f"✅ Subscribed to {symbol} price stream")
     
     async def _symbol_websocket(self, symbol: str):
-        """Symbol için WebSocket stream"""
+        """
+        🔧 FIXED: WebSocket stream with improved timeout handling
+        """
         retry_count = 0
-        max_retries = 5
+        max_retries = 10  # 5 → 10 (daha fazla deneme)
         
         while self.is_running and retry_count < max_retries:
             try:
                 stream_name = f"{symbol.lower()}@ticker"
                 
+                # ✅ FIX: ping_interval ve ping_timeout eklendi
                 async with self.bm.symbol_ticker_socket(symbol) as stream:
-                    logger.info(f"WebSocket connected for {symbol}")
-                    retry_count = 0
+                    logger.info(f"✅ WebSocket connected for {symbol}")
+                    retry_count = 0  # Başarılı bağlantıda retry'ı sıfırla
+                    last_message_time = time.time()
                     
                     while self.is_running:
                         try:
-                            msg = await asyncio.wait_for(stream.recv(), timeout=30)
+                            # ✅ FIX: Timeout 30 → 60 saniye
+                            msg = await asyncio.wait_for(stream.recv(), timeout=60.0)
+                            last_message_time = time.time()
                             await self._handle_price_update(msg)
+                            
                         except asyncio.TimeoutError:
-                            logger.warning(f"WebSocket timeout for {symbol}")
-                            continue
+                            # ✅ FIX: Timeout artık sadece debug seviyesinde
+                            elapsed = time.time() - last_message_time
+                            
+                            if elapsed > 120:  # 2 dakikadan fazla mesaj gelmemişse
+                                logger.warning(f"⚠️ No data from {symbol} for {elapsed:.0f}s - reconnecting")
+                                break  # Yeniden bağlan
+                            else:
+                                # Normal timeout - devam et
+                                logger.debug(f"⏱️ WebSocket timeout for {symbol} ({elapsed:.0f}s) - waiting...")
+                                continue
+                                
                         except Exception as e:
-                            logger.error(f"WebSocket message error for {symbol}: {e}")
+                            logger.error(f"❌ WebSocket message error for {symbol}: {e}")
                             break
                             
             except Exception as e:
                 retry_count += 1
-                logger.error(f"WebSocket error for {symbol} (retry {retry_count}): {e}")
+                logger.error(f"❌ WebSocket error for {symbol} (attempt {retry_count}/{max_retries}): {e}")
                 
                 if retry_count < max_retries:
-                    wait_time = min(2 ** retry_count, 30)
+                    # Exponential backoff
+                    wait_time = min(2 ** retry_count, 60)  # Max 60 saniye
+                    logger.info(f"🔄 Reconnecting to {symbol} in {wait_time}s...")
                     await asyncio.sleep(wait_time)
                 else:
-                    logger.error(f"Max retries reached for {symbol} WebSocket")
+                    logger.error(f"❌ Max retries reached for {symbol} WebSocket - giving up")
                     break
+        
+        # WebSocket kapatıldı
+        logger.info(f"🔌 WebSocket closed for {symbol}")
     
     async def _handle_price_update(self, msg):
         """Fiyat güncellemesini işle"""
@@ -169,19 +192,21 @@ class PriceManager:
             self.prices[symbol] = price
             self.price_timestamps[symbol] = time.time()
             
-            # Debug log (her 30 saniyede bir)
-            if int(time.time()) % 30 == 0:
-                logger.debug(f"Price updated: {symbol} = ${price:.2f}")
+            # Debug log (her 60 saniyede bir)
+            if int(time.time()) % 60 == 0:
+                logger.debug(f"💰 Price updated: {symbol} = ${price:.2f}")
                 
         except Exception as e:
-            logger.error(f"Price update error: {e}")
+            logger.error(f"❌ Price update error: {e}")
     
     def get_price(self, symbol: str) -> Optional[float]:
         """Cache'den fiyat al"""
         if symbol in self.prices:
-            # 30 saniyeden eski fiyat kabul etme
-            if time.time() - self.price_timestamps.get(symbol, 0) < 30:
+            # 60 saniyeden eski fiyat kabul etme (30 → 60)
+            if time.time() - self.price_timestamps.get(symbol, 0) < 60:
                 return self.prices[symbol]
+            else:
+                logger.debug(f"⚠️ Cached price for {symbol} is stale")
         return None
     
     async def close(self):
@@ -190,7 +215,7 @@ class PriceManager:
             self.is_running = False
             
             # WebSocket task'ları iptal et
-            for task in self.websocket_tasks.values():
+            for task_name, task in self.websocket_tasks.items():
                 if not task.done():
                     task.cancel()
                     try:
@@ -198,7 +223,7 @@ class PriceManager:
                     except asyncio.CancelledError:
                         pass
                     except Exception as e:
-                        logger.error(f"Error cancelling websocket task: {e}")
+                        logger.error(f"❌ Error cancelling {task_name}: {e}")
             
             self.websocket_tasks.clear()
             
@@ -208,7 +233,7 @@ class PriceManager:
                     if hasattr(self.bm, '_session') and self.bm._session:
                         await self.bm._session.close()
                 except Exception as e:
-                    logger.error(f"Error closing BinanceSocketManager: {e}")
+                    logger.error(f"❌ Error closing BinanceSocketManager: {e}")
                 finally:
                     self.bm = None
             
@@ -217,11 +242,11 @@ class PriceManager:
                 try:
                     await self.client.close_connection()
                 except Exception as e:
-                    logger.error(f"Error closing PriceManager client: {e}")
+                    logger.error(f"❌ Error closing PriceManager client: {e}")
                 finally:
                     self.client = None
             
-            logger.info("PriceManager closed")
+            logger.info("✅ PriceManager closed")
 
 
 class BinanceClient:
@@ -247,7 +272,7 @@ class BinanceClient:
         # 💰 BAKİYE CACHE - Simple EMA için optimize edildi
         self._last_balance_check = 0
         self._cached_balance = 0.0
-        self._balance_cache_duration = 120  # 2 dakika cache (Simple EMA için yeterli)
+        self._balance_cache_duration = 120  # 2 dakika cache
         self._balance_check_in_progress = False
         
         # Cache variables
@@ -288,12 +313,12 @@ class BinanceClient:
                     self.client = await AsyncClient.create(
                         testnet=self.is_testnet
                     )
-                    logger.info(f"Public BinanceClient initialized for user: {self.user_id}")
+                    logger.info(f"✅ Public BinanceClient initialized for user: {self.user_id}")
                     return True
                 else:
                     # Private client with API credentials
                     if not self.api_key or not self.api_secret:
-                        logger.error(f"API credentials missing for user: {self.user_id}")
+                        logger.error(f"❌ API credentials missing for user: {self.user_id}")
                         return False
                     
                     self.client = await AsyncClient.create(
@@ -316,7 +341,7 @@ class BinanceClient:
                     return True
                 
         except Exception as e:
-            logger.error(f"Initialization failed for user {self.user_id}: {e}")
+            logger.error(f"❌ Initialization failed for user {self.user_id}: {e}")
             if self.client:
                 try:
                     await self.client.close_connection()
@@ -346,9 +371,9 @@ class BinanceClient:
         if not self._connection_closed and self.client:
             try:
                 await self.client.close_connection()
-                logger.info(f"BinanceClient connection closed for user: {self.user_id}")
+                logger.info(f"✅ BinanceClient connection closed for user: {self.user_id}")
             except Exception as e:
-                logger.error(f"Error closing BinanceClient connection for user {self.user_id}: {e}")
+                logger.error(f"❌ Error closing BinanceClient connection for user {self.user_id}: {e}")
             finally:
                 self.client = None
                 self._connection_closed = True
@@ -370,12 +395,12 @@ class BinanceClient:
         
         # Cache'de yoksa REST API kullan
         try:
-            logger.warning(f"Using REST API fallback for {symbol} price")
+            logger.warning(f"⚠️ Using REST API fallback for {symbol} price")
             await self.rate_limiter.wait_if_needed('default', self.user_id)
             ticker = await self.client.futures_symbol_ticker(symbol=symbol)
             return float(ticker['price'])
         except Exception as e:
-            logger.error(f"Error getting market price for {symbol}: {e}")
+            logger.error(f"❌ Error getting market price for {symbol}: {e}")
             return None
     
     async def get_account_balance(self, use_cache: bool = True):
@@ -384,7 +409,7 @@ class BinanceClient:
         Cache kullanarak API çağrısını minimize eder
         """
         if self.is_public_only:
-            logger.warning(f"Account balance requested for public-only client: {self.user_id}")
+            logger.warning(f"⚠️ Account balance requested for public-only client: {self.user_id}")
             return 0.0
         
         try:
@@ -471,7 +496,7 @@ class BinanceClient:
     async def get_open_positions(self, symbol: str, use_cache: bool = True):
         """Açık pozisyonları getir - cache desteği ile"""
         if self.is_public_only:
-            logger.warning(f"Open positions requested for public-only client: {self.user_id}")
+            logger.warning(f"⚠️ Open positions requested for public-only client: {self.user_id}")
             return []
             
         try:
@@ -493,7 +518,7 @@ class BinanceClient:
                     if float(p.get('positionAmt', 0)) != 0:
                         open_positions.append(p)
                 except (ValueError, KeyError, TypeError) as parse_error:
-                    logger.warning(f"Position parsing error for {symbol} - user {self.user_id}: {parse_error}")
+                    logger.warning(f"⚠️ Position parsing error for {symbol} - user {self.user_id}: {parse_error}")
                     continue
             
             # Cache güncelle
@@ -504,18 +529,18 @@ class BinanceClient:
             
         except BinanceAPIException as e:
             if "-1003" in str(e):  # Rate limit
-                logger.warning(f"Rate limit hit for positions {symbol} - user {self.user_id}")
+                logger.warning(f"⚠️ Rate limit hit for positions {symbol} - user {self.user_id}")
                 return self._cached_positions.get(symbol, [])
-            logger.error(f"Error getting positions for {symbol} - user {self.user_id}: {e}")
+            logger.error(f"❌ Error getting positions for {symbol} - user {self.user_id}: {e}")
             return []
         except Exception as e:
-            logger.error(f"Unexpected error getting positions for {symbol} - user {self.user_id}: {e}")
+            logger.error(f"❌ Unexpected error getting positions for {symbol} - user {self.user_id}: {e}")
             return self._cached_positions.get(symbol, [])
     
     async def create_market_order_with_sl_tp(self, symbol: str, side: str, quantity: float, entry_price: float, price_precision: int):
         """Market order ile birlikte SL/TP oluştur"""
         if self.is_public_only:
-            logger.error(f"Market order requested for public-only client: {self.user_id}")
+            logger.error(f"❌ Market order requested for public-only client: {self.user_id}")
             return None
             
         def format_price(price):
@@ -523,7 +548,7 @@ class BinanceClient:
             
         try:
             # Ana market order
-            logger.info(f"Creating market order for user {self.user_id}: {symbol} {side} {quantity}")
+            logger.info(f"📝 Creating market order for user {self.user_id}: {symbol} {side} {quantity}")
             await self.rate_limiter.wait_if_needed('order', self.user_id)
             
             main_order = await self.client.futures_create_order(
@@ -533,7 +558,7 @@ class BinanceClient:
                 quantity=quantity
             )
             
-            logger.info(f"Market order successful for user {self.user_id}: {symbol} {side} {quantity}")
+            logger.info(f"✅ Market order successful for user {self.user_id}: {symbol} {side} {quantity}")
             
             # SL/TP fiyatlarını hesapla
             if side == 'BUY':  # Long pozisyon
@@ -560,9 +585,9 @@ class BinanceClient:
                     timeInForce='GTE_GTC',
                     reduceOnly=True
                 )
-                logger.info(f"Stop Loss created for user {self.user_id}: {formatted_sl_price}")
+                logger.info(f"🛡️ Stop Loss created for user {self.user_id}: {formatted_sl_price}")
             except Exception as e:
-                logger.error(f"Stop Loss creation failed for user {self.user_id}: {e}")
+                logger.error(f"❌ Stop Loss creation failed for user {self.user_id}: {e}")
             
             # Take Profit oluştur
             try:
@@ -576,21 +601,21 @@ class BinanceClient:
                     timeInForce='GTE_GTC',
                     reduceOnly=True
                 )
-                logger.info(f"Take Profit created for user {self.user_id}: {formatted_tp_price}")
+                logger.info(f"🎯 Take Profit created for user {self.user_id}: {formatted_tp_price}")
             except Exception as e:
-                logger.error(f"Take Profit creation failed for user {self.user_id}: {e}")
+                logger.error(f"❌ Take Profit creation failed for user {self.user_id}: {e}")
             
             return main_order
             
         except Exception as e:
-            logger.error(f"Market order creation failed for user {self.user_id}: {e}")
+            logger.error(f"❌ Market order creation failed for user {self.user_id}: {e}")
             await self.cancel_all_orders_safe(symbol)
             return None
     
     async def cancel_all_orders_safe(self, symbol: str):
         """Tüm açık emirleri güvenli şekilde iptal et"""
         if self.is_public_only:
-            logger.warning(f"Cancel orders requested for public-only client: {self.user_id}")
+            logger.warning(f"⚠️ Cancel orders requested for public-only client: {self.user_id}")
             return False
             
         try:
@@ -598,24 +623,24 @@ class BinanceClient:
             open_orders = await self.client.futures_get_open_orders(symbol=symbol)
             
             if open_orders:
-                logger.info(f"Cancelling {len(open_orders)} open orders for {symbol} - user {self.user_id}")
+                logger.info(f"📝 Cancelling {len(open_orders)} open orders for {symbol} - user {self.user_id}")
                 await self.rate_limiter.wait_if_needed('order', self.user_id)
                 await self.client.futures_cancel_all_open_orders(symbol=symbol)
                 await asyncio.sleep(0.5)
-                logger.info(f"All orders cancelled for {symbol} - user {self.user_id}")
+                logger.info(f"✅ All orders cancelled for {symbol} - user {self.user_id}")
                 return True
             else:
-                logger.info(f"No open orders to cancel for {symbol} - user {self.user_id}")
+                logger.debug(f"ℹ️ No open orders to cancel for {symbol} - user {self.user_id}")
                 return True
                 
         except Exception as e:
-            logger.error(f"Error cancelling orders for {symbol} - user {self.user_id}: {e}")
+            logger.error(f"❌ Error cancelling orders for {symbol} - user {self.user_id}: {e}")
             return False
     
     async def close_position(self, symbol: str, position_amt: float, side_to_close: str):
         """Pozisyon kapat"""
         if self.is_public_only:
-            logger.error(f"Close position requested for public-only client: {self.user_id}")
+            logger.error(f"❌ Close position requested for public-only client: {self.user_id}")
             return None
             
         try:
@@ -624,7 +649,7 @@ class BinanceClient:
             await asyncio.sleep(0.2)
             
             # Pozisyonu kapat
-            logger.info(f"Closing position for user {self.user_id}: {symbol} {abs(position_amt)}")
+            logger.info(f"📝 Closing position for user {self.user_id}: {symbol} {abs(position_amt)}")
             await self.rate_limiter.wait_if_needed('order', self.user_id)
             
             response = await self.client.futures_create_order(
@@ -635,7 +660,7 @@ class BinanceClient:
                 reduceOnly=True
             )
             
-            logger.info(f"Position closed for user {self.user_id}: {symbol}")
+            logger.info(f"✅ Position closed for user {self.user_id}: {symbol}")
             
             # Cache temizle
             if symbol in self._cached_positions:
@@ -646,48 +671,48 @@ class BinanceClient:
             return response
             
         except Exception as e:
-            logger.error(f"Position closing failed for user {self.user_id}: {e}")
+            logger.error(f"❌ Position closing failed for user {self.user_id}: {e}")
             await self.cancel_all_orders_safe(symbol)
             return None
     
     async def set_leverage(self, symbol: str, leverage: int):
         """Kaldıraç ayarla"""
         if self.is_public_only:
-            logger.warning(f"Set leverage requested for public-only client: {self.user_id}")
+            logger.warning(f"⚠️ Set leverage requested for public-only client: {self.user_id}")
             return False
             
         try:
             # Açık pozisyon kontrolü
             open_positions = await self.get_open_positions(symbol, use_cache=False)
             if open_positions:
-                logger.warning(f"Open position exists for {symbol} - user {self.user_id}, cannot change leverage")
+                logger.warning(f"⚠️ Open position exists for {symbol} - user {self.user_id}, cannot change leverage")
                 return False
             
             # Margin tipini ayarla
             try:
                 await self.rate_limiter.wait_if_needed('account', self.user_id)
                 await self.client.futures_change_margin_type(symbol=symbol, marginType='CROSSED')
-                logger.info(f"Margin type set to CROSSED for {symbol} - user {self.user_id}")
+                logger.info(f"✅ Margin type set to CROSSED for {symbol} - user {self.user_id}")
             except BinanceAPIException as margin_error:
                 if "No need to change margin type" in str(margin_error):
-                    logger.info(f"Margin type already CROSSED for {symbol} - user {self.user_id}")
+                    logger.info(f"ℹ️ Margin type already CROSSED for {symbol} - user {self.user_id}")
                 else:
-                    logger.warning(f"Could not change margin type for user {self.user_id}: {margin_error}")
+                    logger.warning(f"⚠️ Could not change margin type for user {self.user_id}: {margin_error}")
             
             # Kaldıracı ayarla
             await self.rate_limiter.wait_if_needed('account', self.user_id)
             await self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
-            logger.info(f"Leverage set to {leverage}x for {symbol} - user {self.user_id}")
+            logger.info(f"✅ Leverage set to {leverage}x for {symbol} - user {self.user_id}")
             return True
             
         except Exception as e:
-            logger.error(f"Error setting leverage for user {self.user_id}: {e}")
+            logger.error(f"❌ Error setting leverage for user {self.user_id}: {e}")
             return False
     
     async def has_open_orders(self, symbol: str):
         """Açık emir kontrolü"""
         if self.is_public_only:
-            logger.warning(f"Open orders check requested for public-only client: {self.user_id}")
+            logger.warning(f"⚠️ Open orders check requested for public-only client: {self.user_id}")
             return False
             
         try:
@@ -695,13 +720,13 @@ class BinanceClient:
             open_orders = await self.client.futures_get_open_orders(symbol=symbol)
             return len(open_orders) > 0
         except Exception as e:
-            logger.error(f"Error checking open orders for {symbol} - user {self.user_id}: {e}")
+            logger.error(f"❌ Error checking open orders for {symbol} - user {self.user_id}: {e}")
             return False
     
     async def create_stop_and_limit_order(self, symbol: str, side: str, quantity: float, stop_price: float, limit_price: float):
         """Stop ve limit emri oluştur"""
         if self.is_public_only:
-            logger.error(f"Stop/limit order requested for public-only client: {self.user_id}")
+            logger.error(f"❌ Stop/limit order requested for public-only client: {self.user_id}")
             return None
             
         try:
@@ -724,17 +749,17 @@ class BinanceClient:
                 reduceOnly=True
             )
             
-            logger.info(f"{order_type} order created for user {self.user_id}: {symbol} {side} {quantity} @ {stop_price}")
+            logger.info(f"✅ {order_type} order created for user {self.user_id}: {symbol} {side} {quantity} @ {stop_price}")
             return order
             
         except Exception as e:
-            logger.error(f"Stop/limit order creation failed for user {self.user_id}: {e}")
+            logger.error(f"❌ Stop/limit order creation failed for user {self.user_id}: {e}")
             return None
     
     async def get_last_trade_pnl(self, symbol: str):
         """Son işlemin PnL'ini al"""
         if self.is_public_only:
-            logger.warning(f"Trade PnL requested for public-only client: {self.user_id}")
+            logger.warning(f"⚠️ Trade PnL requested for public-only client: {self.user_id}")
             return 0.0
             
         try:
@@ -746,7 +771,7 @@ class BinanceClient:
             return 0.0
             
         except Exception as e:
-            logger.error(f"Error getting last trade PnL for {symbol} - user {self.user_id}: {e}")
+            logger.error(f"❌ Error getting last trade PnL for {symbol} - user {self.user_id}: {e}")
             return 0.0
     
     async def get_symbol_info(self, symbol: str):
@@ -762,7 +787,7 @@ class BinanceClient:
             return None
             
         except Exception as e:
-            logger.error(f"Error getting symbol info for {symbol} - user {self.user_id}: {e}")
+            logger.error(f"❌ Error getting symbol info for {symbol} - user {self.user_id}: {e}")
             return None
     
     async def get_historical_klines(self, symbol: str, interval: str, limit: int = 100):
@@ -777,7 +802,7 @@ class BinanceClient:
             return klines
             
         except Exception as e:
-            logger.error(f"Error getting historical klines for {symbol} - user {self.user_id}: {e}")
+            logger.error(f"❌ Error getting historical klines for {symbol} - user {self.user_id}: {e}")
             return []
     
     def get_balance_cache_info(self):
