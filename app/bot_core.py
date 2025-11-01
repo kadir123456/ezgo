@@ -1,6 +1,5 @@
-# app/bot_core.py - UPDATED: Bakiye Kontrollü + Basit EMA Kesişimi
+# app/bot_core.py - UPDATED: %90 Bakiye + Kullanıcı Tutarı Desteği
 import asyncio
-import json
 import math
 import time
 import traceback
@@ -16,10 +15,10 @@ logger = get_logger("bot_core")
 class BotCore:
     def __init__(self, user_id: str, api_key: str, api_secret: str, bot_settings: dict):
         """
-        🎯 BAKİYE KONTROLÜ + BASİT EMA KESİŞİMİ BOT
-        - Minimum 20 USDT bakiye kontrolü
-        - Sadece EMA9 x EMA21 kesişimi
-        - Tüm filtreler kaldırıldı
+        🎯 %90 BAKİYE + KULLANICI TUTARI DESTEĞİ
+        - order_size = 0 → Bakiyenin %90'ını kullan
+        - order_size > 0 → Kullanıcının belirlediği tutarı kullan
+        - EMA9 x EMA21 crossover stratejisi
         """
         self.user_id = user_id
         self.api_key = api_key
@@ -39,13 +38,20 @@ class BotCore:
         self.simple_ema_strategy = create_strategy_for_timeframe(timeframe)
         risk_params = self.simple_ema_strategy.get_risk_params()
         
+        # 🔥 YENİ: Order size mode kontrolü
+        raw_order_size = bot_settings.get("order_size", 35.0)
+        self.use_percentage_mode = (raw_order_size == 0)  # 0 ise %90 modu
+        self.percentage_to_use = 90  # %90 kullan
+        self.fixed_order_size = raw_order_size if raw_order_size > 0 else 35.0
+        
         # Bot durumu
         self.status = {
             "is_running": False,
             "symbol": bot_settings.get("symbol", "BTCUSDT"),
             "timeframe": timeframe,
             "leverage": bot_settings.get("leverage", 10),
-            "order_size": bot_settings.get("order_size", 35.0),
+            "order_size": raw_order_size,  # Kullanıcının girdiği değer
+            "order_size_mode": "percentage_90" if self.use_percentage_mode else "fixed",
             
             # 🔧 USER TP/SL values
             "stop_loss": bot_settings.get("stop_loss", risk_params["stop_loss_percent"]),
@@ -117,6 +123,12 @@ class BotCore:
         logger.info(f"💰 Min balance required: {self.min_balance_usdt} USDT")
         logger.info(f"📊 Strategy: EMA9 x EMA21 crossover")
         logger.info(f"🔧 USER TP/SL: SL={self.status['stop_loss']}%, TP={self.status['take_profit']}%")
+        
+        # 🔥 YENİ LOG
+        if self.use_percentage_mode:
+            logger.info(f"💵 ORDER MODE: %{self.percentage_to_use} of balance (dynamic)")
+        else:
+            logger.info(f"💵 ORDER MODE: Fixed {self.fixed_order_size} USDT")
 
     def _get_timeframe_seconds(self, timeframe: str) -> int:
         """Timeframe'i saniyeye çevir"""
@@ -159,7 +171,10 @@ class BotCore:
             # 6. Start components
             await self._start_simple_components()
             
-            self.status["status_message"] = f"🎯 Simple EMA Bot aktif - {self.status['symbol']} ({self.status['timeframe']}) - Min: {self.min_balance_usdt} USDT"
+            # 🔥 Mode bilgisi status mesajına ekle
+            mode_text = f"Mode: %{self.percentage_to_use}" if self.use_percentage_mode else f"Mode: {self.fixed_order_size} USDT"
+            
+            self.status["status_message"] = f"🎯 Simple EMA Bot aktif - {self.status['symbol']} ({self.status['timeframe']}) - {mode_text}"
             self._initialized = True
             logger.info(f"🎯 Simple EMA bot started for user {self.user_id}")
             
@@ -520,8 +535,37 @@ class BotCore:
         except Exception as e:
             logger.error(f"❌ Simple signal action error: {e}")
 
+    def _calculate_dynamic_order_size(self, balance: float, leverage: int, entry_price: float) -> float:
+        """
+        🔥 YENİ: Dinamik order size hesaplama
+        - %90 bakiye modunda: balance * 0.90 kullan
+        - Sabit mod: kullanıcının belirlediği tutarı kullan
+        """
+        try:
+            if self.use_percentage_mode:
+                # %90 bakiye kullan
+                usable_balance = balance * (self.percentage_to_use / 100.0)
+                order_size_usdt = usable_balance
+                logger.info(f"💵 DYNAMIC ORDER: {balance:.2f} USDT balance → {order_size_usdt:.2f} USDT (%{self.percentage_to_use})")
+            else:
+                # Sabit tutar kullan
+                order_size_usdt = self.fixed_order_size
+                logger.info(f"💵 FIXED ORDER: {order_size_usdt:.2f} USDT (user defined)")
+            
+            # Quantity hesapla
+            quantity = (order_size_usdt * leverage) / entry_price
+            formatted_quantity = self._format_quantity(quantity)
+            
+            logger.info(f"💵 Calculated quantity: {formatted_quantity} (price: {entry_price:.2f}, leverage: {leverage}x)")
+            
+            return formatted_quantity
+            
+        except Exception as e:
+            logger.error(f"❌ Dynamic order size calculation error: {e}")
+            return 0.0
+
     async def _open_position(self, signal: str, entry_price: float):
-        """✅ Simple position opening"""
+        """✅ Simple position opening - UPDATED for %90 balance"""
         try:
             logger.info(f"💰 Simple opening {signal} at ${entry_price:.2f}")
             logger.info(f"🔧 USER TP/SL: SL={self.status['stop_loss']}%, TP={self.status['take_profit']}%")
@@ -530,10 +574,13 @@ class BotCore:
             await self.binance_client.cancel_all_orders_safe(self.status["symbol"])
             await asyncio.sleep(0.5)
             
-            # Position size
-            order_size = self.status["order_size"]
+            # 🔥 YENİ: Güncel bakiyeyi al
+            current_balance = await self.binance_client.get_account_balance(use_cache=False)
+            logger.info(f"💰 Current balance: {current_balance:.2f} USDT")
+            
+            # 🔥 YENİ: Dinamik order size hesapla
             leverage = self.status["leverage"]
-            quantity = self._calculate_position_size(order_size, leverage, entry_price)
+            quantity = self._calculate_dynamic_order_size(current_balance, leverage, entry_price)
             
             if quantity <= 0:
                 logger.error(f"❌ Invalid quantity: {quantity}")
@@ -542,7 +589,7 @@ class BotCore:
             # Minimum notional check
             notional = quantity * entry_price
             if notional < self.min_notional:
-                logger.error(f"❌ Below min notional: {notional} < {self.min_notional}")
+                logger.error(f"❌ Below min notional: {notional:.2f} < {self.min_notional}")
                 return False
             
             # 🎯 Simple Market order with CUSTOM TP/SL
@@ -580,7 +627,9 @@ class BotCore:
                     "take_profit_percent": self.status["take_profit"],
                     "strategy": f"Simple_EMA_{self.status['timeframe']}",
                     "signal_type": "EMA_CROSSOVER",
-                    "balance_at_open": self.status["account_balance"],
+                    "balance_at_open": current_balance,
+                    "order_mode": "percentage_90" if self.use_percentage_mode else "fixed",
+                    "order_size_usdt": quantity * entry_price / leverage,
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 })
                 
@@ -789,8 +838,15 @@ class BotCore:
             if self.status["position_side"] and self.current_price and self.status["entry_price"]:
                 entry_price = self.status["entry_price"]
                 current_price = self.current_price
-                order_size = self.status["order_size"]
                 leverage = self.status["leverage"]
+                
+                # 🔥 YENİ: Order size'ı mode'a göre hesapla
+                if self.use_percentage_mode:
+                    # %90 bakiye kullanıldı
+                    order_size = self.status["account_balance"] * (self.percentage_to_use / 100.0)
+                else:
+                    # Sabit tutar kullanıldı
+                    order_size = self.fixed_order_size
                 
                 if self.status["position_side"] == "LONG":
                     pnl_percentage = ((current_price - entry_price) / entry_price) * 100 * leverage
@@ -873,7 +929,10 @@ class BotCore:
                 strategy_text = f" [EMA9xEMA21 {self.status['timeframe']}]"
                 tp_sl_text = f" TP:{self.status['take_profit']}% SL:{self.status['stop_loss']}%"
                 
-                self.status["status_message"] = f"🎯 Simple Bot{strategy_text} - {self.status['symbol']}{price_text}{position_text}{signal_text}{balance_text}{tp_sl_text}"
+                # 🔥 YENİ: Mode bilgisi ekle
+                mode_text = f" Mode:%{self.percentage_to_use}" if self.use_percentage_mode else f" Mode:{self.fixed_order_size}$"
+                
+                self.status["status_message"] = f"🎯 Simple Bot{strategy_text} - {self.status['symbol']}{price_text}{position_text}{signal_text}{balance_text}{tp_sl_text}{mode_text}"
                 
         except Exception as e:
             logger.error(f"❌ Simple status update error: {e}")
@@ -901,6 +960,8 @@ class BotCore:
                     "min_balance_required": self.min_balance_usdt,
                     "balance_sufficient": self.status["balance_sufficient"],
                     "strategy_type": "simple_ema_crossover",
+                    "order_size_mode": self.status["order_size_mode"],  # 🔥 YENİ
+                    "order_size": self.status["order_size"],  # 🔥 YENİ
                     "last_bot_update": int(time.time() * 1000)
                 }
                 
@@ -936,14 +997,6 @@ class BotCore:
             
         except Exception as e:
             logger.error(f"❌ Simple trade logging error: {e}")
-
-    def _calculate_position_size(self, order_size: float, leverage: int, price: float) -> float:
-        """Position size calculation"""
-        try:
-            quantity = (order_size * leverage) / price
-            return self._format_quantity(quantity)
-        except:
-            return 0.0
 
     def _format_quantity(self, quantity: float) -> float:
         """Quantity formatting"""
@@ -993,6 +1046,7 @@ class BotCore:
             "consecutive_losses": self.consecutive_losses,
             "last_trade_time": self.status.get("last_trade_time"),
             "order_size": self.status["order_size"],
+            "order_size_mode": self.status["order_size_mode"],  # 🔥 YENİ
             "stop_loss": self.status["stop_loss"],
             "take_profit": self.status["take_profit"],
             "last_price_update": self._last_price_update,
@@ -1000,8 +1054,10 @@ class BotCore:
             "insufficient_balance_count": self.insufficient_balance_count,
             
             # Simple EMA specific info
-            "strategy_description": "🎯 Simple EMA9 x EMA21 Crossover",
+            "strategy_description": "🎯 Simple EMA9 x EMA21 Crossover with %90 Balance Support",
             "filters": "None - Pure crossover signals",
             "balance_monitoring": "Active - Every 2 minutes",
-            "auto_stop_on_insufficient_balance": True
+            "auto_stop_on_insufficient_balance": True,
+            "percentage_mode": self.use_percentage_mode,  # 🔥 YENİ
+            "percentage_value": self.percentage_to_use if self.use_percentage_mode else None  # 🔥 YENİ
         }
