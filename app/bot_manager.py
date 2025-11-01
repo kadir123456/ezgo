@@ -1,4 +1,4 @@
-# app/bot_manager.py - UPDATED: Bakiye Kontrollü + Simple EMA Integration
+# app/bot_manager.py - UPDATED: %90 Bakiye Validation
 import asyncio
 import time
 from typing import Dict, Optional
@@ -6,29 +6,47 @@ from collections import defaultdict
 from app.bot_core import BotCore
 from app.utils.logger import get_logger
 from app.utils.crypto import decrypt_data
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 logger = get_logger("bot_manager")
 
 class StartRequest(BaseModel):
-    # ✅ UPDATED: Tüm timeframe'leri destekle + bakiye validation
+    """
+    🔥 UPDATED: order_size artık 0 olabilir
+    - order_size = 0 → %90 bakiye kullan
+    - order_size > 0 → Belirli tutar kullan
+    """
     symbol: str = Field(..., min_length=6, max_length=12)
     timeframe: str = Field(..., pattern=r'^(1m|3m|5m|15m|30m|1h|2h|4h|6h|8h|12h|1d)$')
     leverage: int = Field(..., ge=1, le=125)
-    order_size: float = Field(..., ge=20.0, le=10000.0)  # ✅ Minimum 20 USDT (bakiye için)
-    stop_loss: float = Field(..., ge=0.01, le=50.0)     # 0.01% - 50%
-    take_profit: float = Field(..., ge=0.01, le=100.0)  # 0.01% - 100%
+    order_size: float = Field(..., ge=0.0, le=10000.0)  # ✅ 0 artık kabul edilir
+    stop_loss: float = Field(..., ge=0.01, le=50.0)
+    take_profit: float = Field(..., ge=0.01, le=100.0)
+
+    @validator('order_size')
+    def validate_order_size(cls, v):
+        """
+        Order size validation:
+        - 0 = %90 bakiye modu
+        - 10-10000 = Sabit tutar modu
+        - 0.01-9.99 = Geçersiz (çok düşük)
+        """
+        if v == 0.0:
+            # %90 bakiye modu - OK
+            return v
+        elif v < 10.0:
+            raise ValueError("Order size must be 0 (for 90% balance mode) or >= 10 USDT (for fixed mode)")
+        return v
 
     class Config:
-        # Validation examples
         schema_extra = {
             "example": {
                 "symbol": "BTCUSDT",
                 "timeframe": "15m",
                 "leverage": 10,
-                "order_size": 50.0,    # ✅ 35 -> 50 (bakiye için yeterli)
-                "stop_loss": 0.8,      # ✅ Simple EMA için optimize
-                "take_profit": 1.0     # ✅ Simple EMA için optimize
+                "order_size": 0,  # ✅ 0 = %90 bakiye kullan
+                "stop_loss": 0.8,
+                "take_profit": 1.0
             }
         }
 
@@ -99,10 +117,10 @@ class RateLimitTracker:
 
 class SimpleBotManager:
     """
-    💰 BAKİYE KONTROLÜ + Simple EMA Bot Manager
-    - Minimum 20 USDT bakiye kontrolü
+    💰 %90 BAKİYE + KULLANICI TUTARI DESTEĞİ Bot Manager
+    - order_size = 0 → Bakiyenin %90'ını kullan
+    - order_size > 0 → Kullanıcının belirlediği tutarı kullan
     - EMA9 x EMA21 kesişimi stratejisi
-    - Otomatik bot durdurma (yetersiz bakiye)
     """
     
     def __init__(self):
@@ -116,16 +134,22 @@ class SimpleBotManager:
         self._monitor_task = None
         self._running = False
         
-        logger.info("💰 SimpleBotManager initialized with balance control + Simple EMA")
+        logger.info("💰 SimpleBotManager initialized with %90 balance support")
 
     async def start_bot_for_user(self, uid: str, bot_settings: StartRequest) -> Dict:
         """
-        💰 BAKİYE KONTROLÜ + Simple EMA bot başlatma
+        💰 %90 BAKİYE + KULLANICI TUTARI bot başlatma
         """
         try:
-            logger.info(f"💰 Starting Simple EMA bot for user: {uid}")
+            # 🔥 Order size mode belirleme
+            if bot_settings.order_size == 0:
+                mode_text = "90% Balance Mode"
+                logger.info(f"💰 Starting bot for user {uid} in %90 BALANCE MODE")
+            else:
+                mode_text = f"Fixed {bot_settings.order_size} USDT Mode"
+                logger.info(f"💰 Starting bot for user {uid} in FIXED {bot_settings.order_size} USDT MODE")
+            
             logger.info(f"🔧 Settings: Symbol={bot_settings.symbol}, TF={bot_settings.timeframe}")
-            logger.info(f"💰 Order Size: {bot_settings.order_size} USDT (Min: 20 USDT)")
             logger.info(f"📊 TP/SL: {bot_settings.take_profit}%/{bot_settings.stop_loss}%")
             
             # Rate limit kontrolü
@@ -163,17 +187,17 @@ class SimpleBotManager:
                 if not api_key or not api_secret:
                     return {"error": "API anahtarları çözülemedi."}
 
-                # ✅ UPDATED: StartRequest'i dict'e çevir + bakiye validation
+                # ✅ UPDATED: StartRequest'i dict'e çevir
                 bot_settings_dict = {
                     "symbol": bot_settings.symbol,
                     "timeframe": bot_settings.timeframe,
                     "leverage": bot_settings.leverage,
-                    "order_size": bot_settings.order_size,
-                    "stop_loss": bot_settings.stop_loss,        # Kullanıcının değeri
-                    "take_profit": bot_settings.take_profit     # Kullanıcının değeri
+                    "order_size": bot_settings.order_size,  # ✅ 0 veya pozitif değer
+                    "stop_loss": bot_settings.stop_loss,
+                    "take_profit": bot_settings.take_profit
                 }
                 
-                # 💰 BAKIYE ÖN KONTROLÜ - Bot başlatmadan önce
+                # 💰 BAKIYE ÖN KONTROLÜ
                 try:
                     from app.binance_client import BinanceClient
                     
@@ -188,16 +212,32 @@ class SimpleBotManager:
                     
                     logger.info(f"💰 Pre-start balance check: {current_balance:.2f} USDT")
                     
-                    # Minimum bakiye kontrolü (20 USDT + order size buffer)
-                    min_required = max(20.0, bot_settings.order_size * 0.1)  # En az order_size'ın %10'u
+                    # Minimum bakiye kontrolü
+                    min_required = 20.0  # Minimum 20 USDT
+                    
+                    if bot_settings.order_size == 0:
+                        # %90 bakiye modu - bakiyenin %90'ı en az 10 USDT olmalı
+                        usable_balance = current_balance * 0.90
+                        if usable_balance < 10.0:
+                            return {
+                                "error": f"Yetersiz bakiye: {current_balance:.2f} USDT × 90% = {usable_balance:.2f} USDT. "
+                                       f"%90 bakiye modu için en az {10/0.90:.2f} USDT bakiye gerekli."
+                            }
+                        logger.info(f"✅ %90 Balance mode: {usable_balance:.2f} USDT will be used")
+                    else:
+                        # Sabit tutar modu - bakiye order_size'dan fazla olmalı
+                        if current_balance < bot_settings.order_size:
+                            return {
+                                "error": f"Yetersiz bakiye: {current_balance:.2f} USDT < {bot_settings.order_size} USDT"
+                            }
+                        logger.info(f"✅ Fixed mode: {bot_settings.order_size} USDT will be used")
                     
                     if current_balance < min_required:
                         return {
-                            "error": f"Yetersiz bakiye: {current_balance:.2f} USDT < {min_required:.2f} USDT. "
-                                   f"Simple EMA bot için minimum {min_required:.1f} USDT gerekli."
+                            "error": f"Yetersiz bakiye: {current_balance:.2f} USDT < {min_required} USDT minimum gerekli."
                         }
                     
-                    logger.info(f"✅ Balance check passed: {current_balance:.2f} USDT >= {min_required:.2f} USDT")
+                    logger.info(f"✅ Balance check passed: {current_balance:.2f} USDT >= {min_required} USDT")
                     
                 except Exception as balance_error:
                     logger.error(f"💰 Balance pre-check failed: {balance_error}")
@@ -205,7 +245,7 @@ class SimpleBotManager:
                 
                 logger.info(f"🎯 Bot settings dict: {bot_settings_dict}")
                 
-                # ✅ UPDATED: BotCore'a dict geç
+                # ✅ BotCore'u başlat
                 bot_core = BotCore(uid, api_key, api_secret, bot_settings_dict)
                 
                 # BotCore'u başlat
@@ -220,7 +260,8 @@ class SimpleBotManager:
                     "settings": bot_settings_dict,
                     "start_time": time.time(),
                     "balance_at_start": current_balance,
-                    "min_balance_required": min_required
+                    "min_balance_required": min_required,
+                    "order_mode": "percentage_90" if bot_settings.order_size == 0 else "fixed"
                 }
                 
                 self.active_users[uid] = user_config
@@ -235,10 +276,11 @@ class SimpleBotManager:
                     "strategy_type": "Simple EMA Crossover",
                     "leverage": bot_settings.leverage,
                     "order_size": bot_settings.order_size,
+                    "order_size_mode": user_config["order_mode"],
                     "stop_loss": bot_settings.stop_loss,
                     "take_profit": bot_settings.take_profit,
                     "position_side": bot_status.get("position_side"),
-                    "status_message": f"💰 Simple EMA Bot aktif - {bot_settings.symbol} ({bot_settings.timeframe}) - Min: {min_required:.1f} USDT",
+                    "status_message": f"💰 Simple EMA Bot aktif - {bot_settings.symbol} ({bot_settings.timeframe}) - {mode_text}",
                     "account_balance": bot_status.get("account_balance", 0),
                     "balance_sufficient": bot_status.get("balance_sufficient", True),
                     "min_balance_required": min_required,
@@ -261,7 +303,7 @@ class SimpleBotManager:
                 
                 return {
                     "success": True,
-                    "message": f"💰 Simple EMA trading bot başarıyla başlatıldı",
+                    "message": f"💰 Simple EMA trading bot başarıyla başlatıldı ({mode_text})",
                     "settings": {
                         "timeframe": bot_settings.timeframe,
                         "symbol": bot_settings.symbol,
@@ -270,6 +312,7 @@ class SimpleBotManager:
                         "take_profit": bot_settings.take_profit,
                         "leverage": bot_settings.leverage,
                         "order_size": bot_settings.order_size,
+                        "order_mode": user_config["order_mode"],
                         "balance_monitoring": True,
                         "min_balance_required": min_required
                     },
@@ -277,7 +320,9 @@ class SimpleBotManager:
                         "current_balance": current_balance,
                         "min_required": min_required,
                         "balance_sufficient": True,
-                        "monitoring_enabled": True
+                        "monitoring_enabled": True,
+                        "order_mode": user_config["order_mode"],
+                        "usable_amount": current_balance * 0.90 if bot_settings.order_size == 0 else bot_settings.order_size
                     },
                     "status": self.user_statuses[uid]
                 }
@@ -317,30 +362,20 @@ class SimpleBotManager:
             return {"error": f"Bot durdurulamadı: {str(e)}"}
 
     def get_bot_status(self, uid: str) -> Dict:
-        """BotCore'dan gerçek status al + bakiye bilgisi"""
+        """BotCore'dan gerçek status al"""
         if uid in self.bot_instances:
             bot_core = self.bot_instances[uid]
             real_status = bot_core.get_status()
-            
-            # 💰 Bakiye bilgilerini ekle
-            balance_cache_info = bot_core.binance_client.get_balance_cache_info()
             
             # System stats ekle
             real_status["system_info"] = {
                 "total_active_bots": len(self.bot_instances),
                 "shared_websocket": True,
-                "architecture": "simple_ema_balance_controlled",
+                "architecture": "simple_ema_balance_90_controlled",
                 "timeframe_support": ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"],
                 "strategy": "EMA9 x EMA21 Crossover",
-                "balance_monitoring": True
-            }
-            
-            # 💰 Bakiye monitoring bilgileri
-            real_status["balance_info"] = {
-                **balance_cache_info,
-                "monitoring_active": True,
-                "auto_stop_enabled": True,
-                "check_interval": "2 minutes"
+                "balance_monitoring": True,
+                "order_modes": ["percentage_90", "fixed"]
             }
             
             return real_status
@@ -361,24 +396,22 @@ class SimpleBotManager:
             "total_pnl": 0.0,
             "last_check_time": None,
             "last_signal": "HOLD",
+            "order_size": 0,
+            "order_size_mode": "percentage_90",
             "stop_loss": 0.0,
-            "take_profit": 0.0,
-            "balance_info": {
-                "monitoring_active": False,
-                "message": "Bot not running"
-            }
+            "take_profit": 0.0
         }
 
     async def _global_monitor_loop(self):
-        """Global monitor loop + bakiye monitoring"""
-        logger.info("💰 Global monitor loop started with balance monitoring + Simple EMA")
+        """Global monitor loop"""
+        logger.info("💰 Global monitor loop started with %90 balance support")
         
         while self._running:
             try:
-                # Her kullanıcı için BotCore sync + balance check
+                # Her kullanıcı için BotCore sync
                 for uid in list(self.bot_instances.keys()):
                     try:
-                        await self._sync_botcore_status_with_balance(uid)
+                        await self._sync_botcore_status(uid)
                         self._queue_firebase_update(uid)
                     except Exception as e:
                         logger.error(f"❌ Monitor error for user {uid}: {e}")
@@ -392,8 +425,8 @@ class SimpleBotManager:
                 logger.error(f"❌ Global monitor error: {e}")
                 await asyncio.sleep(10)
 
-    async def _sync_botcore_status_with_balance(self, uid: str):
-        """BotCore status sync + balance monitoring"""
+    async def _sync_botcore_status(self, uid: str):
+        """BotCore status sync"""
         if uid in self.bot_instances and uid in self.user_statuses:
             try:
                 bot_core = self.bot_instances[uid]
@@ -418,12 +451,14 @@ class SimpleBotManager:
                     "consecutive_losses": real_status.get("consecutive_losses", 0),
                     "stop_loss": real_status.get("stop_loss", 0),
                     "take_profit": real_status.get("take_profit", 0),
+                    "order_size": real_status.get("order_size", 0),
+                    "order_size_mode": real_status.get("order_size_mode", "percentage_90"),
                     "strategy_type": "Simple EMA Crossover",
                     "timeframe": real_status.get("timeframe", "15m"),
                     "last_check_time": time.time()
                 })
                 
-                # 💰 Bakiye yetersizliği nedeniyle bot durmuşsa temizle
+                # Bakiye yetersizliği nedeniyle bot durmuşsa temizle
                 if not real_status.get("is_running", True):
                     balance_sufficient = real_status.get("balance_sufficient", True)
                     if not balance_sufficient:
@@ -437,7 +472,7 @@ class SimpleBotManager:
                 logger.error(f"❌ BotCore sync error for user {uid}: {e}")
 
     def _queue_firebase_update(self, uid: str):
-        """Firebase update queue + bakiye bilgileri"""
+        """Firebase update queue"""
         if uid in self.user_statuses:
             status = self.user_statuses[uid]
             update_data = {
@@ -458,9 +493,10 @@ class SimpleBotManager:
                 "last_signal": status.get("last_signal", "HOLD"),
                 "data_candles": status.get("data_candles", 0),
                 "consecutive_losses": status.get("consecutive_losses", 0),
-                # ✅ UPDATED: TP/SL değerlerini Firebase'e kaydet
                 "user_stop_loss": status.get("stop_loss", 0),
                 "user_take_profit": status.get("take_profit", 0),
+                "order_size": status.get("order_size", 0),
+                "order_size_mode": status.get("order_size_mode", "percentage_90"),
                 "strategy_indicators": "EMA9 x EMA21",
                 "balance_monitoring_active": True,
                 "last_bot_update": int(time.time() * 1000)
@@ -470,13 +506,12 @@ class SimpleBotManager:
     async def shutdown_all_bots(self):
         """Tüm botları durdur"""
         try:
-            logger.info("💰 Shutting down all Simple EMA bots...")
+            logger.info("💰 Shutting down all bots...")
             self._running = False
             
             if self._monitor_task and not self._monitor_task.done():
                 self._monitor_task.cancel()
 
-            # Tüm BotCore instance'larını durdur
             for uid, bot_core in list(self.bot_instances.items()):
                 try:
                     await bot_core.stop()
@@ -485,14 +520,11 @@ class SimpleBotManager:
                     logger.error(f"❌ Error stopping BotCore for user {uid}: {e}")
             
             self.bot_instances.clear()
-
-            # Final Firebase batch
             await self.firebase_batcher.flush_all()
-
             self.active_users.clear()
             self.user_statuses.clear()
             
-            logger.info("✅ All Simple EMA BotCore instances shutdown completed")
+            logger.info("✅ All BotCore instances shutdown completed")
             
         except Exception as e:
             logger.error(f"❌ Shutdown error: {e}")
@@ -502,7 +534,7 @@ class SimpleBotManager:
         return len(self.bot_instances)
 
     def get_system_stats(self) -> dict:
-        """System istatistikleri + bakiye monitoring"""
+        """System istatistikleri"""
         trading_bots = len(self.bot_instances)
         active_traders = sum(1 for uid in self.bot_instances 
                            if self.user_statuses.get(uid, {}).get("position_side"))
@@ -510,30 +542,10 @@ class SimpleBotManager:
         total_trades = sum(status.get("total_trades", 0) for status in self.user_statuses.values())
         total_pnl = sum(status.get("total_pnl", 0) for status in self.user_statuses.values())
         
-        # Balance monitoring stats
-        users_with_sufficient_balance = sum(1 for status in self.user_statuses.values() 
-                                          if status.get("balance_sufficient", True))
-        users_with_insufficient_balance = trading_bots - users_with_sufficient_balance
-        
-        # Timeframe distribution
-        timeframes_used = {}
-        tp_sl_stats = {"min_tp": 100, "max_tp": 0, "min_sl": 100, "max_sl": 0}
-        
-        for status in self.user_statuses.values():
-            # Timeframe stats
-            timeframe = status.get("timeframe", "unknown")
-            if timeframe:
-                timeframes_used[timeframe] = timeframes_used.get(timeframe, 0) + 1
-            
-            # TP/SL stats
-            tp = status.get("take_profit", 0)
-            sl = status.get("stop_loss", 0)
-            if tp > 0:
-                tp_sl_stats["min_tp"] = min(tp_sl_stats["min_tp"], tp)
-                tp_sl_stats["max_tp"] = max(tp_sl_stats["max_tp"], tp)
-            if sl > 0:
-                tp_sl_stats["min_sl"] = min(tp_sl_stats["min_sl"], sl)
-                tp_sl_stats["max_sl"] = max(tp_sl_stats["max_sl"], sl)
+        # Order mode stats
+        percentage_mode_users = sum(1 for status in self.user_statuses.values() 
+                                   if status.get("order_size_mode") == "percentage_90")
+        fixed_mode_users = trading_bots - percentage_mode_users
         
         return {
             "total_active_users": len(self.active_users),
@@ -541,73 +553,18 @@ class SimpleBotManager:
             "bots_with_positions": active_traders,
             "total_trades_executed": total_trades,
             "total_system_pnl": round(total_pnl, 2),
-            "balance_monitoring": {
-                "users_with_sufficient_balance": users_with_sufficient_balance,
-                "users_with_insufficient_balance": users_with_insufficient_balance,
-                "monitoring_enabled": True,
-                "auto_stop_enabled": True,
-                "min_balance_requirement": "20 USDT"
+            "order_mode_distribution": {
+                "percentage_90_users": percentage_mode_users,
+                "fixed_mode_users": fixed_mode_users
             },
             "strategy_info": {
                 "type": "Simple EMA Crossover",
                 "indicators": "EMA9 x EMA21",
-                "filters": "None - Pure crossover",
-                "signal_types": ["Golden Cross (LONG)", "Death Cross (SHORT)"]
+                "order_modes": "90% Balance or Fixed Amount"
             },
-            "timeframes_distribution": timeframes_used,
-            "tp_sl_stats": tp_sl_stats,
-            "active_user_ids": list(self.active_users.keys()),
-            "system_status": "SIMPLE_EMA_BALANCE_CONTROLLED",
-            "architecture": "simple_ema_with_balance_monitoring",
-            "supported_timeframes": ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"],
-            "features": {
-                "real_trading": "✅ ENABLED",
-                "balance_monitoring": "✅ ENABLED",
-                "simple_ema_strategy": "✅ ENABLED",
-                "auto_stop_insufficient_balance": "✅ ENABLED",
-                "shared_websocket": "✅ ENABLED", 
-                "rate_limiting": "✅ ENABLED",
-                "firebase_batching": "✅ ENABLED",
-                "multi_timeframe": "✅ ENABLED",
-                "custom_tp_sl": "✅ ENABLED"
-            },
-            "performance": {
-                "strategy": "Simple & Fast EMA Crossovers",
-                "api_calls_saved": "95%+",
-                "memory_efficiency": "HIGH",
-                "balance_protection": "ACTIVE"
-            }
+            "system_status": "SIMPLE_EMA_BALANCE_90_CONTROLLED",
+            "architecture": "simple_ema_with_90_percent_balance_support"
         }
 
-    def get_user_list_with_stats(self) -> dict:
-        """Kullanıcı listesi detaylı bilgiler ile + bakiye durumu"""
-        users = []
-        for uid, status in self.user_statuses.items():
-            user_info = {
-                "user_id": uid,
-                "symbol": status.get("symbol"),
-                "timeframe": status.get("timeframe"),
-                "strategy": "EMA9 x EMA21",
-                "is_running": status.get("is_running", False),
-                "position": status.get("position_side"),
-                "balance": status.get("account_balance", 0),
-                "balance_sufficient": status.get("balance_sufficient", True),
-                "min_balance_required": status.get("min_balance_required", 20.0),
-                "pnl": status.get("total_pnl", 0),
-                "trades": status.get("total_trades", 0),
-                "signal": status.get("last_signal", "HOLD"),
-                "price": status.get("current_price"),
-                "stop_loss": status.get("stop_loss", 0),
-                "take_profit": status.get("take_profit", 0),
-                "uptime": time.time() - self.active_users.get(uid, {}).get("start_time", time.time())
-            }
-            users.append(user_info)
-        
-        return {
-            "users": users,
-            "total_count": len(users),
-            "system_stats": self.get_system_stats()
-        }
-
-# Global bot manager instance - Updated
+# Global bot manager instance
 bot_manager = SimpleBotManager()
