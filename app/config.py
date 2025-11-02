@@ -36,9 +36,9 @@ class Settings:
     # --- Bot Ayarları ---
     DEFAULT_LEVERAGE: int = int(os.getenv("DEFAULT_LEVERAGE", "10"))
     DEFAULT_ORDER_SIZE_USDT: float = float(os.getenv("DEFAULT_ORDER_SIZE_USDT", "20.0"))
-    DEFAULT_TIMEFRAME: str = os.getenv("DEFAULT_TIMEFRAME", "15m")
-    DEFAULT_STOP_LOSS_PERCENT: float = float(os.getenv("DEFAULT_STOP_LOSS_PERCENT", "2.0"))
-    DEFAULT_TAKE_PROFIT_PERCENT: float = float(os.getenv("DEFAULT_TAKE_PROFIT_PERCENT", "4.0"))
+    DEFAULT_TIMEFRAME: str = os.getenv("DEFAULT_TIMEFRAME", "1m")
+    DEFAULT_STOP_LOSS_PERCENT: float = float(os.getenv("DEFAULT_STOP_LOSS_PERCENT", "0.3"))
+    DEFAULT_TAKE_PROFIT_PERCENT: float = float(os.getenv("DEFAULT_TAKE_PROFIT_PERCENT", "0.5"))
     
     # --- EMA Ayarları ---
     EMA_SHORT_PERIOD: int = int(os.getenv("EMA_SHORT_PERIOD", "9"))
